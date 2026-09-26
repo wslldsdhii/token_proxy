@@ -274,17 +274,19 @@ describe("config/url-compose-editor", () => {
   });
 
   // ══════════ MY-STRIP-VERSION PATCH 9 (test) START ══════════
-  it("每个家族行有去除版本号复选框，悬浮提示为固定文案", async () => {
+  it("每个家族行仅一个复选框（无固定文字），悬浮提示为去除版本号", async () => {
     const user = userEvent.setup();
     setup({ providers: ["openai", "anthropic"] });
     await expand(user);
 
-    // 每个家族一个复选框，label 带 hover title
+    // 每个家族一个复选框，带 hover title
     const checkboxes = screen.getAllByRole("checkbox", {
-      name: m.url_compose_strip_version_label(),
+      name: m.url_compose_strip_version_title(),
     });
     expect(checkboxes.length).toBe(2);
     expect(screen.getAllByTitle(m.url_compose_strip_version_title()).length).toBe(2);
+    // 复选框旁不渲染固定文字（提示只出现在悬浮 title 中）
+    expect(screen.queryByText(m.url_compose_strip_version_title())).toBeNull();
   });
 
   it("勾选去除版本号：版本段红色删除线，取消恢复紫色", async () => {
@@ -299,7 +301,7 @@ describe("config/url-compose-editor", () => {
     expect(document.body.querySelector(".line-through")).toBeNull();
 
     const checkbox = screen.getByRole("checkbox", {
-      name: m.url_compose_strip_version_label(),
+      name: m.url_compose_strip_version_title(),
     });
     await user.click(checkbox);
 
@@ -367,7 +369,7 @@ describe("config/url-compose-editor", () => {
 
     await expand(user);
     const checkbox = screen.getByRole("checkbox", {
-      name: m.url_compose_strip_version_label(),
+      name: m.url_compose_strip_version_title(),
     });
     expect(checkbox.getAttribute("data-state")).toBe("checked");
 

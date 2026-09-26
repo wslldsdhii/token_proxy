@@ -397,20 +397,20 @@ export function UrlComposeEditor({
                       />
                     </div>
                   </div>
-                  {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════ */}
+                  {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+                      仅复选框不带文字（260926-01 验收反馈收窄）；悬浮 title 即「去除版本号」。 */}
                   <label
-                    className="flex h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground"
+                    className="flex h-9 cursor-pointer items-center px-0.5"
                     title={m.url_compose_strip_version_title()}
                   >
                     <Checkbox
                       checked={stripVersion}
-                      aria-label={m.url_compose_strip_version_label()}
+                      aria-label={m.url_compose_strip_version_title()}
                       className="size-3.5"
                       onCheckedChange={(checked) => {
                         update(family, { strip_version: checked === true });
                       }}
                     />
-                    {m.url_compose_strip_version_label()}
                   </label>
                   {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════ */}
                   <Button

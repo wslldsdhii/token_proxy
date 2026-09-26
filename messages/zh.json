@@ -717,7 +717,6 @@
   "my_proxy_endpoint_key_label": "本地 Key",
   "my_proxy_endpoint_key_empty": "未配置本地 API Key",
   "my_proxy_endpoint_update_failed": "更新代理接入地址失败",
-  "url_compose_strip_version_label": "去除版本号",
-  "url_compose_strip_version_title": "去除版本号：转发时先按版本段匹配，再把版本段整体去掉（适配无版本号前缀的渠道商，如 .../chat/completions）",
+  "url_compose_strip_version_title": "去除版本号",
   "url_compose_strip_version_hint": "勾选「去除版本号」后：客户端请求第一段匹配 /v1 时，版本段不会出现在出站 URL 中（后缀仍照常填写，红色删除线仅表示转发时去除）；非 /v1 开头的路径不受影响。"
 }

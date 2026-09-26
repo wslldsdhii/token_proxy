@@ -717,7 +717,6 @@
   "my_proxy_endpoint_key_label": "Local key",
   "my_proxy_endpoint_key_empty": "No local API key",
   "my_proxy_endpoint_update_failed": "Failed to update the proxy endpoint",
-  "url_compose_strip_version_label": "Strip version",
-  "url_compose_strip_version_title": "Strip version: match the version segment first, then remove it entirely when forwarding (for vendors without a version prefix, e.g. .../chat/completions)",
+  "url_compose_strip_version_title": "Strip version",
   "url_compose_strip_version_hint": "With \"Strip version\" checked: when the client path's first segment matches /v1, the version segment is omitted from the outbound URL (fill the suffix as usual; the red strikethrough only marks it as stripped on forward); paths not starting with /v1 are unaffected."
 }

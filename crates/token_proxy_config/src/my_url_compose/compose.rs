@@ -54,7 +54,18 @@ fn compose_from_parts(
     let version = compose
         .map(|value| version_segment(&value.suffix))
         .unwrap_or_else(|| DEFAULT_VERSION_SEGMENT.to_string());
-    let mut url = format!("{base}{prefix}{}", replace_version_segment(path, &version));
+    // ══════════ MY-STRIP-VERSION PATCH 2 (compose) START ══════════
+    // 去除版本段：匹配语义与替换一致（首段恰为 /v1），仅把替换产物整体去掉
+    // （等价"先正常替换、最后去掉版本段区域"，版本段填 /v3 等同样被去除）；
+    // 非 /v1 首段不替换也不去除。
+    let strip_version = compose.is_some_and(|value| value.strip_version);
+    let outbound_path = if strip_version && version_segment_matched(path) {
+        path[INBOUND_VERSION_SEGMENT.len()..].to_string()
+    } else {
+        replace_version_segment(path, &version)
+    };
+    let mut url = format!("{base}{prefix}{outbound_path}");
+    // ══════════ MY-STRIP-VERSION PATCH 2 (compose) END ══════════
     if let Some(query) = query {
         url.push('?');
         url.push_str(query);
@@ -75,12 +86,18 @@ fn version_segment(suffix: &str) -> String {
     segment.unwrap_or_else(|| DEFAULT_VERSION_SEGMENT.to_string())
 }
 
+// ══════════ MY-STRIP-VERSION PATCH 2 (compose) START ══════════
+/// 客户端路径第一段是否恰为 `/v1`（`/v10/...`、`/v1beta/...` 均不算）。
+fn version_segment_matched(path: &str) -> bool {
+    path.starts_with(INBOUND_VERSION_SEGMENT)
+        && (path.len() == INBOUND_VERSION_SEGMENT.len()
+            || path.as_bytes()[INBOUND_VERSION_SEGMENT.len()] == b'/')
+}
+// ══════════ MY-STRIP-VERSION PATCH 2 (compose) END ══════════
+
 /// 仅当客户端路径第一段恰为 `/v1` 时替换为版本段（`/v10/...` 不受影响）。
 fn replace_version_segment(path: &str, version: &str) -> String {
-    let matched = path.starts_with(INBOUND_VERSION_SEGMENT)
-        && (path.len() == INBOUND_VERSION_SEGMENT.len()
-            || path.as_bytes()[INBOUND_VERSION_SEGMENT.len()] == b'/');
-    if matched {
+    if version_segment_matched(path) {
         format!("{version}{}", &path[INBOUND_VERSION_SEGMENT.len()..])
     } else {
         path.to_string()

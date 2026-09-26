@@ -120,7 +120,14 @@ export type UpstreamConfig = {
 };
 
 /** ═══ MY-URL-COMPOSE PATCH G1 START：接口地址组合（与后端 UrlComposeConfig 对齐） ═══ */
-export type UrlComposeEndpoint = { prefix: string; suffix: string };
+export type UrlComposeEndpoint = {
+  prefix: string;
+  suffix: string;
+  // ══════════ MY-STRIP-VERSION PATCH 5 (types) START ══════════
+  /** 去除版本号：转发时先按版本段匹配、再整体去除（无版本号渠道商）；缺省 false。 */
+  strip_version?: boolean;
+  // ══════════ MY-STRIP-VERSION PATCH 5 (types) END ══════════
+};
 
 export type UrlComposeConfig = {
   openai?: UrlComposeEndpoint;

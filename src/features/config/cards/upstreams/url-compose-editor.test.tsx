@@ -272,4 +272,113 @@ describe("config/url-compose-editor", () => {
     const suffixInput = screen.getAllByRole("textbox")[1] as HTMLInputElement;
     expect(suffixInput.value).toBe("/v9/chat/completions");
   });
+
+  // ══════════ MY-STRIP-VERSION PATCH 9 (test) START ══════════
+  it("每个家族行有去除版本号复选框，悬浮提示为固定文案", async () => {
+    const user = userEvent.setup();
+    setup({ providers: ["openai", "anthropic"] });
+    await expand(user);
+
+    // 每个家族一个复选框，label 带 hover title
+    const checkboxes = screen.getAllByRole("checkbox", {
+      name: m.url_compose_strip_version_label(),
+    });
+    expect(checkboxes.length).toBe(2);
+    expect(screen.getAllByTitle(m.url_compose_strip_version_title()).length).toBe(2);
+  });
+
+  it("勾选去除版本号：版本段红色删除线，取消恢复紫色", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup({
+      providers: ["openai"],
+      value: { openai: { prefix: "", suffix: "/v1/chat/completions" } },
+    });
+    await expand(user);
+
+    // 未勾选：无删除线
+    expect(document.body.querySelector(".line-through")).toBeNull();
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: m.url_compose_strip_version_label(),
+    });
+    await user.click(checkbox);
+
+    // 勾选后：镜像层与预览行的版本段带删除线，onChange 携带 strip_version: true
+    await waitFor(() => {
+      const struck = [...document.body.querySelectorAll(".line-through")];
+      expect(struck.map((element) => element.textContent)).toContain("/v1");
+    });
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as {
+        openai?: { prefix: string; suffix: string; strip_version?: boolean };
+      };
+      expect(lastCall.openai).toEqual({
+        prefix: "",
+        suffix: "/v1/chat/completions",
+        strip_version: true,
+      });
+    });
+
+    // 取消勾选恢复（无删除线），strip_version 回落为 false（载荷转换时过滤不落盘）
+    await user.click(checkbox);
+    await waitFor(() => {
+      expect(document.body.querySelector(".line-through")).toBeNull();
+    });
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as {
+        openai?: { strip_version?: boolean };
+      };
+      expect(lastCall.openai?.strip_version).toBe(false);
+    });
+  });
+
+  it("勾选去除版本号后映射浮窗展示去除版本段的最终出站地址", async () => {
+    const user = userEvent.setup();
+    setup({
+      providers: ["anthropic"],
+      value: { anthropic: { prefix: "/anthropic", suffix: "/v1/messages", strip_version: true } },
+    });
+    await expand(user);
+
+    const mapButton = screen.getByRole("button", { name: m.url_compose_map_open() });
+    await user.click(mapButton);
+    await waitFor(() => {
+      expect(
+        screen.getByText(m.url_compose_map_title({ name: m.url_compose_family_anthropic() }))
+      ).toBeDefined();
+    });
+
+    const dialog = screen.getByRole("dialog", {
+      name: m.url_compose_map_title({ name: m.url_compose_family_anthropic() }),
+    });
+    // 出站地址不含版本段：/v1/messages/count_tokens → /anthropic/messages/count_tokens
+    expect(dialog.textContent).toContain("https://x.com/anthropic/messages/count_tokens");
+    expect(dialog.textContent).not.toContain("https://x.com/anthropic/v1/");
+  });
+
+  it("仅勾选去除版本号（前后缀全空）家族保留，取消后家族删除", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup({
+      providers: ["openai"],
+      value: { openai: { prefix: "", suffix: "", strip_version: true } },
+    });
+    // 勾选计入已配置摘要
+    expect(screen.getByText(m.url_compose_summary_configured({ count: 1 }))).toBeDefined();
+
+    await expand(user);
+    const checkbox = screen.getByRole("checkbox", {
+      name: m.url_compose_strip_version_label(),
+    });
+    expect(checkbox.getAttribute("data-state")).toBe("checked");
+
+    // 取消勾选：前后缀全空且未勾选 → 家族键删除
+    await user.click(checkbox);
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as {
+        openai?: Record<string, unknown>;
+      };
+      expect(lastCall.openai).toBeUndefined();
+    });
+  });
+  // ══════════ MY-STRIP-VERSION PATCH 9 (test) END ══════════
 });

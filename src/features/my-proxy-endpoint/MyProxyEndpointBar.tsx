@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Check, Copy, Info, KeyRound, Plug } from "lucide-react";
+// ══════════ MY-STRIP-VERSION PATCH 10 (bar) START ══════════
+// Info 图标随提示长文案移除而不再使用。
+import { Check, Copy, KeyRound, Plug } from "lucide-react";
+// ══════════ MY-STRIP-VERSION PATCH 10 (bar) END ══════════
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -288,10 +291,8 @@ export function MyProxyEndpointBar() {
                 <span>{copied === "url" ? m.my_proxy_endpoint_copied() : m.my_proxy_endpoint_copy_url()}</span>
               </Button>
             </div>
-
-            <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
-              {m.my_proxy_endpoint_listen_label()} {snapshot.listenHost}:{snapshot.port}
-            </span>
+            {/* ══════════ MY-STRIP-VERSION PATCH 10 (bar) START ══════════
+                监听徽标移至第二行「复制 Key」之后；第一行行尾不再显示。 */}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-dashed pt-2">
@@ -325,14 +326,13 @@ export function MyProxyEndpointBar() {
               )}
               <span>{copied === "key" ? m.my_proxy_endpoint_copied() : m.my_proxy_endpoint_copy_key()}</span>
             </Button>
-            <span className="ml-auto flex min-w-0 flex-1 basis-64 items-center gap-1 text-[11px] text-muted-foreground">
-              <Info className="size-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">
-                {snapshot.scanEnabled
-                  ? m.my_proxy_endpoint_hint_scan({ port: snapshot.port })
-                  : m.my_proxy_endpoint_hint_loopback()}
-              </span>
+            <span
+              data-testid="my-proxy-endpoint-listen"
+              className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap"
+            >
+              {m.my_proxy_endpoint_listen_label()} {snapshot.listenHost}:{snapshot.port}
             </span>
+            {/* ══════════ MY-STRIP-VERSION PATCH 10 (bar) END ══════════ */}
           </div>
         </CardContent>
       </Card>

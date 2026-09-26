@@ -59,6 +59,10 @@ function toUrlComposeForm(
     result[family] = {
       prefix: normalizeUrlComposeSegment(endpoint.prefix ?? ""),
       suffix: normalizeUrlComposeSegment(endpoint.suffix ?? ""),
+      // ══════════ MY-STRIP-VERSION PATCH 6 (form) START ══════════
+      // 稀疏透传：仅 true 时携带，保持既有表单形状不变（编辑器按 ?? false 读取）。
+      ...(endpoint.strip_version ? { strip_version: true } : {}),
+      // ══════════ MY-STRIP-VERSION PATCH 6 (form) END ══════════
     };
   }
   return result;
@@ -73,11 +77,15 @@ function toUrlComposePayload(value: UrlComposeConfig): UrlComposeConfig | undefi
     }
     const prefix = normalizeUrlComposeSegment(endpoint.prefix);
     const suffix = normalizeUrlComposeSegment(endpoint.suffix);
-    // 前缀与后缀全空视为未配置该家族，保持落盘配置精简。
-    if (!prefix && !suffix) {
+    // ══════════ MY-STRIP-VERSION PATCH 6 (form) START ══════════
+    const stripVersion = endpoint.strip_version === true;
+    // 前缀、后缀全空且未勾选去除版本号视为未配置该家族，保持落盘配置精简。
+    if (!prefix && !suffix && !stripVersion) {
       continue;
     }
-    result[family] = { prefix, suffix };
+    // 仅勾选时落盘 strip_version，与后端 skip_serializing_if 对齐。
+    result[family] = stripVersion ? { prefix, suffix, strip_version: true } : { prefix, suffix };
+    // ══════════ MY-STRIP-VERSION PATCH 6 (form) END ══════════
   }
   return Object.keys(result).length ? result : undefined;
 }

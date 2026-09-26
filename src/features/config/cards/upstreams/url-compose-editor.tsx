@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   type UrlComposeConfig,
@@ -114,6 +115,21 @@ type ComposePreview = {
   full: string;
 };
 
+// ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+/** 版本段样式：勾选去除版本号后红色删除线（转发时去除的视觉暗示），否则紫色。 */
+function versionSegmentClass(stripVersion: boolean): string {
+  return stripVersion
+    ? "rounded bg-red-500/15 font-bold text-red-600 line-through dark:text-red-400"
+    : "rounded bg-violet-500/15 font-bold text-violet-700 dark:text-violet-300";
+}
+
+function versionPreviewClass(stripVersion: boolean): string {
+  return stripVersion
+    ? "text-red-600 font-bold line-through dark:text-red-400"
+    : "text-violet-700 dark:text-violet-300 font-bold";
+}
+// ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════
+
 function composePreview(baseUrl: string, endpoint: UrlComposeEndpoint): ComposePreview {
   const base = baseUrl.trim().replace(/\/+$/, "");
   const prefix = normalizeSegment(endpoint.prefix);
@@ -187,11 +203,14 @@ export function UrlComposeEditor({
     (family: UrlComposeFamily, patch: Partial<UrlComposeEndpoint>) => {
       const next: UrlComposeConfig = { ...value };
       const merged = { ...endpointOf(family), ...patch };
-      if (!merged.prefix && !merged.suffix) {
+      // ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+      // 三者全空才视为未配置家族（仅勾选去除版本号也保留落盘）。
+      if (!merged.prefix && !merged.suffix && merged.strip_version !== true) {
         delete next[family];
       } else {
         next[family] = merged;
       }
+      // ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════
       onChange(next);
     },
     [endpointOf, onChange, value]
@@ -201,8 +220,14 @@ export function UrlComposeEditor({
     const endpoint = endpointOf(family);
     const prefix = normalizeSegment(endpoint.prefix);
     const suffix = normalizeSegment(endpoint.suffix);
-    // 已定制 = prefix 非空，或 suffix 非空且不等于该家族默认后缀。
-    return prefix !== "" || (suffix !== "" && suffix !== DEFAULT_SUFFIX[family]);
+    // ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+    // 已定制 = prefix 非空、suffix 非空且不等于该家族默认后缀，或勾选去除版本号。
+    return (
+      prefix !== "" ||
+      (suffix !== "" && suffix !== DEFAULT_SUFFIX[family]) ||
+      endpoint.strip_version === true
+    );
+    // ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════
   }).length;
 
   const summary = !selected.length
@@ -228,7 +253,11 @@ export function UrlComposeEditor({
   }, [mapFamily]);
 
   const renderPreview = (family: UrlComposeFamily) => {
-    const preview = composePreview(baseUrl, endpointOf(family));
+    const endpoint = endpointOf(family);
+    // ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+    const stripVersion = endpoint.strip_version === true;
+    // ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════
+    const preview = composePreview(baseUrl, endpoint);
     if (!preview.base) {
       return (
         <span className="text-muted-foreground text-xs italic">{m.url_compose_preview_empty_base()}</span>
@@ -243,7 +272,9 @@ export function UrlComposeEditor({
         <span className="text-amber-700 dark:text-amber-400 font-semibold">{preview.prefix}</span>
         {preview.suffix ? (
           <>
-            <span className="text-violet-700 dark:text-violet-300 font-bold">{preview.version}</span>
+            {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════ */}
+            <span className={versionPreviewClass(stripVersion)}>{preview.version}</span>
+            {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════ */}
             <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{tail}</span>
           </>
         ) : (
@@ -284,6 +315,9 @@ export function UrlComposeEditor({
           </p>
           {selected.map((family) => {
             const endpoint = endpointOf(family);
+            // ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+            const stripVersion = endpoint.strip_version === true;
+            // ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════
             const version = versionSegment(endpoint.suffix);
             const suffixNormalized = normalizeSegment(endpoint.suffix);
             const head = suffixNormalized ? suffixNormalized.slice(0, version.length) : "";
@@ -298,7 +332,10 @@ export function UrlComposeEditor({
                     {FAMILY_TAG[family]}
                   </span>
                 </div>
-                <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)_36px] items-end gap-2">
+                {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+                    四列：prefix + suffix（收窄让位）+ 去除版本号复选框 + 恢复按钮。 */}
+                <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,6fr)_auto_36px] items-end gap-2">
+                {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════ */}
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
                       {m.url_compose_prefix_label()}
@@ -327,9 +364,11 @@ export function UrlComposeEditor({
                       >
                         {head || rest ? (
                           <>
-                            <span className="rounded bg-violet-500/15 font-bold text-violet-700 dark:text-violet-300">
+                            {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════ */}
+                            <span className={versionSegmentClass(stripVersion)}>
                               {head}
                             </span>
+                            {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════ */}
                             <span>{rest}</span>
                           </>
                         ) : null}
@@ -358,6 +397,22 @@ export function UrlComposeEditor({
                       />
                     </div>
                   </div>
+                  {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════ */}
+                  <label
+                    className="flex h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[11px] text-muted-foreground"
+                    title={m.url_compose_strip_version_title()}
+                  >
+                    <Checkbox
+                      checked={stripVersion}
+                      aria-label={m.url_compose_strip_version_label()}
+                      className="size-3.5"
+                      onCheckedChange={(checked) => {
+                        update(family, { strip_version: checked === true });
+                      }}
+                    />
+                    {m.url_compose_strip_version_label()}
+                  </label>
+                  {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════ */}
                   <Button
                     type="button"
                     variant="outline"
@@ -414,6 +469,11 @@ export function UrlComposeEditor({
           <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
             {m.url_compose_footnote()}
           </p>
+          {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════ */}
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            {m.url_compose_strip_version_hint()}
+          </p>
+          {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════ */}
         </>
       ) : null}
 
@@ -432,6 +492,9 @@ export function UrlComposeEditor({
           </div>
           {(() => {
             const preview = composePreview(baseUrl, endpointOf(mapFamily));
+            // ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════
+            const stripVersion = endpointOf(mapFamily).strip_version === true;
+            // ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════
             if (!preview.base) {
               return <div className="text-muted-foreground">{m.url_compose_map_no_base()}</div>;
             }
@@ -455,7 +518,11 @@ export function UrlComposeEditor({
                       <span className="break-all">
                         <span className="text-primary font-semibold">{preview.base}</span>
                         <span className="text-amber-700 dark:text-amber-400 font-semibold">{preview.prefix}</span>
-                        <span className="text-violet-700 dark:text-violet-300 font-bold">{preview.version}</span>
+                        {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) START ══════════ */}
+                        {stripVersion ? null : (
+                          <span className="text-violet-700 dark:text-violet-300 font-bold">{preview.version}</span>
+                        )}
+                        {/* ══════════ MY-STRIP-VERSION PATCH 8 (editor) END ══════════ */}
                         {rest}
                       </span>
                     </div>

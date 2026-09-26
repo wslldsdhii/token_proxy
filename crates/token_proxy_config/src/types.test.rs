@@ -139,6 +139,7 @@ fn test_upstream_url() {
             openai: Some(EndpointCompose {
                 prefix: prefix.to_string(),
                 suffix: suffix.to_string(),
+                ..Default::default()
             }),
             ..Default::default()
         }
@@ -217,6 +218,7 @@ fn test_upstream_url() {
             anthropic: Some(EndpointCompose {
                 prefix: "/anthropic".to_string(),
                 suffix: "/v1/messages".to_string(),
+                ..Default::default()
             }),
             ..Default::default()
         },

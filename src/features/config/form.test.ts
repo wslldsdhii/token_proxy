@@ -68,6 +68,46 @@ describe("config/form url_compose", () => {
     blank.urlCompose = { anthropic: { prefix: "/", suffix: "//" } };
     expect(toPayload({ ...EMPTY_FORM, upstreams: [blank] }).upstreams[0]?.url_compose).toBeUndefined();
   });
+
+  // ══════════ MY-STRIP-VERSION PATCH 7 (test) START ══════════
+  it("round-trips strip_version through form and payload", () => {
+    const upstream = createEmptyUpstream();
+    upstream.urlCompose = {
+      openai: { prefix: "", suffix: "/v1/chat/completions", strip_version: true },
+      anthropic: { prefix: "", suffix: "/v1/messages" },
+    };
+
+    const payload = toPayload({ ...EMPTY_FORM, upstreams: [upstream] });
+    // 勾选家族落盘 strip_version: true；未勾选家族不出现该键。
+    expect(payload.upstreams[0]?.url_compose).toEqual({
+      openai: { prefix: "", suffix: "/v1/chat/completions", strip_version: true },
+      anthropic: { prefix: "", suffix: "/v1/messages" },
+    });
+
+    const restored = toForm(payload);
+    expect(restored.upstreams[0].urlCompose).toEqual({
+      openai: { prefix: "", suffix: "/v1/chat/completions", strip_version: true },
+      anthropic: { prefix: "", suffix: "/v1/messages" },
+    });
+  });
+
+  it("keeps a family persisted when only strip_version is checked", () => {
+    const upstream = createEmptyUpstream();
+    upstream.urlCompose = {
+      openai: { prefix: "", suffix: "", strip_version: true },
+    };
+
+    const payload = toPayload({ ...EMPTY_FORM, upstreams: [upstream] });
+    expect(payload.upstreams[0]?.url_compose).toEqual({
+      openai: { prefix: "", suffix: "", strip_version: true },
+    });
+
+    const restored = toForm(payload);
+    expect(restored.upstreams[0].urlCompose).toEqual({
+      openai: { prefix: "", suffix: "", strip_version: true },
+    });
+  });
+  // ══════════ MY-STRIP-VERSION PATCH 7 (test) END ══════════
 });
 
 describe("config/form", () => {

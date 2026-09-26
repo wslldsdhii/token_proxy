@@ -156,4 +156,24 @@ describe("my-proxy-endpoint/MyProxyEndpointBar", () => {
     expect(bar).toBeInTheDocument();
     expect(screen.queryByTestId("my-proxy-endpoint-url")).toBeNull();
   });
+
+  // ══════════ MY-STRIP-VERSION PATCH 11 (test) START ══════════
+  it("listen badge sits after the copy key entry and the hint line is gone", async () => {
+    renderBar();
+    await screen.findByTestId("my-proxy-endpoint-bar");
+
+    const listen = screen.getByTestId("my-proxy-endpoint-listen");
+    expect(listen).toHaveTextContent("0.0.0.0:9208");
+
+    // 徽标在第二行「复制 Key」所在行容器内，且不在第一行 URL 行容器内
+    const keyRow = screen.getByTestId("my-proxy-endpoint-copy-key").parentElement;
+    expect(keyRow).toContainElement(listen);
+    const urlRow = screen.getByTestId("my-proxy-endpoint-copy-url").parentElement;
+    expect(urlRow).not.toContainElement(listen);
+
+    // 「复制 Key」后不再有提示长文案（en 基准文案片段）
+    expect(document.body.textContent).not.toContain("never shown");
+    expect(screen.queryByTestId("my-proxy-endpoint-listen")).toBeDefined();
+  });
+  // ══════════ MY-STRIP-VERSION PATCH 11 (test) END ══════════
 });

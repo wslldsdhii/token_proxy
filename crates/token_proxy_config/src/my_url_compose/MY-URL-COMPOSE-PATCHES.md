@@ -5,6 +5,16 @@
 锚点上下文重新注入。完整维护流程见
 `../docs/项目维护/260922-01-gui和api请求逻辑优化/维护手册-main对齐指南.md`。
 
+> ══════════ MY-STRIP-VERSION PATCH（260926-01 去除版本号）══════════
+> 本模块内所有文件均为独立整文件搬运，strip_version 相关改动（横幅
+> `MY-STRIP-VERSION PATCH 1~4`：config 字段、compose 去除语义、compose/mod 测试）
+> 随整文件搬运，无需额外注入点。GUI 侧编辑器（PATCH 8/9）、配置类型（PATCH 5~7）、
+> 仪表盘 Bar（PATCH 10/11）见维护手册
+> `docs/项目维护/260926-01-url-compose去除版本号/`。
+> 语义：`EndpointCompose.strip_version` 开启且客户端路径首段匹配 `/v1` 时，
+> 出站 URL 不携带版本段（等价"先替换后去除"）；非 `/v1` 首段原样拼接。
+> ═══════════════════════════════════════════════════════════════════
+
 | PATCH | 文件 | 内容 |
 |---|---|---|
 | C0 | `crates/token_proxy_config/src/lib.rs` | `pub mod my_url_compose;` 模块声明 |

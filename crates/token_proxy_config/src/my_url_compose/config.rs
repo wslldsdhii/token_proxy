@@ -5,7 +5,8 @@
 //! dashscope 四个接口家族的
 // ══════════ MY-DASHSCOPE-PASSTHROUGH PATCH 2 (config) END ══════════
 //! `prefix`（特殊拼接）与 `suffix`（完整后缀，第一段为"版本段"），
-//! 由 `compose.rs` 在出站时做纯拼接与版本段替换。
+//! 由 `compose.rs` 在出站时做纯拼接与版本段替换；
+//! `strip_version` 开启时匹配到的版本段在出站前整体去除。
 
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,13 @@ pub struct EndpointCompose {
     pub prefix: String,
     #[serde(default)]
     pub suffix: String,
+    // ══════════ MY-STRIP-VERSION PATCH 1 (config) START ══════════
+    /// 去除版本段：开启后先按版本段匹配，再把匹配到的版本段整体去除
+    /// （适配无版本号前缀的渠道商，如 `.../chat/completions`）。
+    /// 缺省 false；仅 true 时落盘，旧配置文件与新程序、新配置文件与旧程序均兼容。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strip_version: bool,
+    // ══════════ MY-STRIP-VERSION PATCH 1 (config) END ══════════
 }
 
 impl EndpointCompose {
@@ -44,6 +52,9 @@ impl EndpointCompose {
         Self {
             prefix: normalize_segment(&self.prefix),
             suffix: normalize_segment(&self.suffix),
+            // ══════════ MY-STRIP-VERSION PATCH 1 (config) START ══════════
+            strip_version: self.strip_version,
+            // ══════════ MY-STRIP-VERSION PATCH 1 (config) END ══════════
         }
     }
 }

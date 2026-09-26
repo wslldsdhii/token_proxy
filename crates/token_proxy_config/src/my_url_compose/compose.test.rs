@@ -6,9 +6,21 @@ fn compose(base: &str, prefix: &str, suffix: &str, path: &str) -> String {
     let endpoint = EndpointCompose {
         prefix: prefix.to_string(),
         suffix: suffix.to_string(),
+        ..Default::default()
     };
     compose_from_parts(base, Some(&endpoint), path)
 }
+
+// ══════════ MY-STRIP-VERSION PATCH 3 (test) START ══════════
+fn compose_strip(base: &str, prefix: &str, suffix: &str, path: &str) -> String {
+    let endpoint = EndpointCompose {
+        prefix: prefix.to_string(),
+        suffix: suffix.to_string(),
+        strip_version: true,
+    };
+    compose_from_parts(base, Some(&endpoint), path)
+}
+// ══════════ MY-STRIP-VERSION PATCH 3 (test) END ══════════
 
 fn unconfigured(base: &str, path: &str) -> String {
     compose_from_parts(base, None, path)
@@ -164,6 +176,7 @@ fn config_normalized_deep_copies() {
     config.anthropic = Some(EndpointCompose {
         prefix: "anthropic/".to_string(),
         suffix: " /v1/messages ".to_string(),
+        ..Default::default()
     });
     let normalized = config.normalized();
     let anthropic = normalized.anthropic.as_ref().unwrap();
@@ -255,3 +268,127 @@ fn dashscope_empty_family_falls_back_to_identity() {
     );
 }
 // ══════════ MY-DASHSCOPE-PASSTHROUGH PATCH 2 (test) END ══════════
+
+// ══════════ MY-STRIP-VERSION PATCH 3 (test) START ══════════
+// ── 去除版本段（strip_version） ──────────────────────────────────────
+
+#[test]
+fn strip_removes_version_segment_after_match() {
+    // 基础语义：suffix 仍填 /v1/chat/completions，出站不再携带 /v1。
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v1/chat/completions", "/v1/chat/xxxx"),
+        "https://x.com/chat/xxxx"
+    );
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v1/chat/completions", "/v1/models"),
+        "https://x.com/models"
+    );
+}
+
+#[test]
+fn strip_keeps_prefix_for_prefixless_vendor() {
+    // 无版本号渠道商 + 特殊拼接：anthropic 直连 /anthropic/messages。
+    assert_eq!(
+        compose_strip("https://x.com", "/anthropic", "/v1/messages", "/v1/messages"),
+        "https://x.com/anthropic/messages"
+    );
+    assert_eq!(
+        compose_strip("https://x.com", "/anthropic", "/v1/messages", "/v1/messages/count_tokens"),
+        "https://x.com/anthropic/messages/count_tokens"
+    );
+}
+
+#[test]
+fn strip_removes_arbitrary_version_segment_like_v3() {
+    // 版本段区域填 /v3 等任意值：替换后同样被去除，无额外语义。
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v3/chat/completions", "/v1/chat/xxxx"),
+        "https://x.com/chat/xxxx"
+    );
+    assert_eq!(
+        compose_strip("https://x.com", "", "/abc/chat/completions", "/v1/abcdefg/xxx"),
+        "https://x.com/abcdefg/xxx"
+    );
+}
+
+#[test]
+fn strip_leaves_non_v1_first_segments_untouched() {
+    // 非 /v1 首段：不替换也不去除，与未开启时逐字节一致。
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v3/chat/completions", "/v1beta/openai/models"),
+        "https://x.com/v1beta/openai/models"
+    );
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v3/chat/completions", "/alpha/search"),
+        "https://x.com/alpha/search"
+    );
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v3/chat/completions", "/v10/models"),
+        "https://x.com/v10/models"
+    );
+}
+
+#[test]
+fn strip_with_empty_suffix_uses_fallback_version_segment() {
+    // 空 suffix：回退版本段 /v1 参与匹配与去除。
+    assert_eq!(
+        compose_strip("https://x.com", "", "", "/v1/models"),
+        "https://x.com/models"
+    );
+}
+
+#[test]
+fn strip_path_exactly_v1_yields_empty_path() {
+    // 客户端路径恰为 /v1：版本段去除后路径为空，出站 = base + prefix。
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v1/chat/completions", "/v1"),
+        "https://x.com"
+    );
+    assert_eq!(
+        compose_strip("https://x.com", "/anthropic", "/v1/messages", "/v1"),
+        "https://x.com/anthropic"
+    );
+}
+
+#[test]
+fn strip_preserves_query_verbatim() {
+    assert_eq!(
+        compose_strip("https://x.com", "", "/v1/chat/completions", "/v1/models?limit=100&b=2"),
+        "https://x.com/models?limit=100&b=2"
+    );
+}
+
+#[test]
+fn strip_disabled_keeps_replacement_byte_identical() {
+    // strip_version 缺省 false：与既有替换行为逐字节一致。
+    assert_eq!(
+        compose("https://x.com", "", "/v3/chat/completions", "/v1/chat/xxxx"),
+        "https://x.com/v3/chat/xxxx"
+    );
+}
+
+#[test]
+fn strip_applies_to_dashscope_family() {
+    assert_eq!(
+        compose_strip(
+            "https://ws.cn-beijing.maas.aliyuncs.com",
+            "/api",
+            "/v1/services/aigc/text-generation/generation",
+            "/v1/services/aigc/x/generation"
+        ),
+        "https://ws.cn-beijing.maas.aliyuncs.com/api/services/aigc/x/generation"
+    );
+}
+
+#[test]
+fn normalized_preserves_strip_version() {
+    let mut config = crate::my_url_compose::UrlComposeConfig::default();
+    config.openai = Some(EndpointCompose {
+        prefix: String::new(),
+        suffix: "/v1/chat/completions".to_string(),
+        strip_version: true,
+    });
+    let normalized = config.normalized();
+    assert!(normalized.openai.as_ref().unwrap().strip_version);
+}
+// ══════════ MY-STRIP-VERSION PATCH 3 (test) END ══════════

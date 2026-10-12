@@ -669,7 +669,15 @@ fn build_model_catalog_response_body(
                     display_names_by_model.get(&model),
                 ));
             }
+            // ══════════ MY-CATALOG-DEDUPE PATCH 1 START ══════════
+            // 同一 upstream id 会按协议投影/api_key 展开为多个运行时条目（normalize 层），
+            // 输出端按 id 保序去重：每渠道只出一条 `upstream_id/model`。
+            // 裸名补发条件保持按原始条目数判定（含同 id 重复），行为与修复前一致。
+            let mut emitted_upstream_ids = HashSet::new();
             for upstream_id in upstream_ids {
+                if !emitted_upstream_ids.insert(upstream_id.as_str()) {
+                    continue;
+                }
                 let prefixed = format!("{upstream_id}/{model}");
                 data.push(model_catalog_item(
                     &prefixed,
@@ -678,6 +686,7 @@ fn build_model_catalog_response_body(
                     display_names_by_model.get(&model),
                 ));
             }
+            // ══════════ MY-CATALOG-DEDUPE PATCH 1 END ══════════
             continue;
         }
         // 默认：全上游可广告模型去重并集，仅裸名。
@@ -809,6 +818,45 @@ mod tests {
             ]
         );
     }
+
+    // ══════════ MY-CATALOG-DEDUPE TEST START ══════════
+    #[test]
+    fn model_catalog_response_prefix_mode_dedupes_same_upstream_id_projections() {
+        // 同一 upstream id 按协议投影/api_key 展开为多个同 id 条目时，
+        // 每模型只应输出一条 `{id}/{model}` 前缀条目；裸名条目仍按原始条目数补发。
+        let sources = vec![
+            (
+                "solo".to_string(),
+                vec![ModelCatalogEntry {
+                    id: "model-x".to_string(),
+                    display_name: None,
+                }],
+            ),
+            (
+                "solo".to_string(),
+                vec![ModelCatalogEntry {
+                    id: "model-x".to_string(),
+                    display_name: None,
+                }],
+            ),
+            (
+                "other".to_string(),
+                vec![ModelCatalogEntry {
+                    id: "model-x".to_string(),
+                    display_name: None,
+                }],
+            ),
+        ];
+        let body = build_model_catalog_response_body(&sources, true);
+        let ids = body["data"]
+            .as_array()
+            .expect("data")
+            .iter()
+            .filter_map(|item| item["id"].as_str().map(str::to_string))
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["model-x", "solo/model-x", "other/model-x"]);
+    }
+    // ══════════ MY-CATALOG-DEDUPE TEST END ══════════
 
     #[test]
     fn xai_catalog_uses_protocol_ids_before_display_names() {

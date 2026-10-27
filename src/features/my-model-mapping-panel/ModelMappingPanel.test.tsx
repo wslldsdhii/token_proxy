@@ -70,7 +70,7 @@ describe("my-model-mapping-panel", () => {
     expect(await screen.findByText("glm5")).toBeTruthy();
     expect(screen.getByText("k2")).toBeTruthy();
     const indexCells = screen.getAllByText(/^[123]$/);
-    expect(indexCells).toHaveLength(3, "编号连续 1..3");
+    expect(indexCells).toHaveLength(3); // 编号连续 1..3
   });
 
   it("搜索词过滤映射名与模型 id；清空恢复", async () => {
@@ -106,7 +106,8 @@ describe("my-model-mapping-panel", () => {
         await userEvent.click(option);
       }
     }
-    const lastCall = persistMock.mock.calls.at(-1)?.[0] as string[];
+    const calls = persistMock.mock.calls as string[][];
+    const lastCall = calls[calls.length - 1];
     expect(lastCall.filter((c) => c !== "alias").length).toBeLessThan(4);
     expect(
       ["alias", "upstream", "target", "providers"].filter((c) => !lastCall.includes(c)),
@@ -132,7 +133,7 @@ describe("my-model-mapping-panel", () => {
     renderPanel();
     await expand();
     await screen.findByText("glm5");
-    expect(screen.queryByText("glm-5.3")).toBeNull("target 列被隐藏");
-    expect(screen.queryByText("kimi-k2")).toBeNull("kimi 的 target 同样不渲染");
+    expect(screen.queryByText("glm-5.3")).toBeNull(); // target 列被隐藏
+    expect(screen.queryByText("kimi-k2")).toBeNull(); // kimi 的 target 同样不渲染
   });
 });

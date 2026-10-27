@@ -20,6 +20,9 @@ pub(crate) mod model_discovery;
 mod openai;
 mod openai_compat;
 mod path_guard;
+// ══════════ RATE-RECORDER PATCH (module) START ══════════
+pub mod rate_recorder;
+// ══════════ RATE-RECORDER PATCH (module) END ══════════
 mod redact;
 mod request_body;
 pub mod request_detail;

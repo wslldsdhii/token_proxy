@@ -196,7 +196,7 @@ pub(crate) fn build_log_entry(
         context.mapped_model.as_deref(),
         usage.response_model.as_deref(),
     );
-    LogEntry {
+    let entry = LogEntry {
         ts_ms: now_ms(),
         client_ip: context.client_ip.clone(),
         path: context.path.clone(),
@@ -231,7 +231,12 @@ pub(crate) fn build_log_entry(
             .map(|cost| cost.context_tier.as_str().to_string()),
         client_request_id: billing_attempt.map(|attempt| attempt.request_id.clone()),
         attempt_index: billing_attempt.map(|attempt| attempt.index),
-    }
+    };
+    // ══════════ RATE-RECORDER PATCH 1 (bypass record) START ══════════
+    // 旁路速率记录：开关未启用时零行为；启用时异步写 rate.db（不阻塞转发）。
+    crate::proxy::rate_recorder::maybe_record(context, &entry);
+    // ══════════ RATE-RECORDER PATCH 1 (bypass record) END ══════════
+    entry
 }
 
 fn log_upstream_response_model_mismatch(

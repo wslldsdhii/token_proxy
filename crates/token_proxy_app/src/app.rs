@@ -94,6 +94,10 @@ impl TokenProxyApp {
         // ══════════ MY-STATS-API PATCH 3 (spawn) START ══════════
         crate::my_stats_api::spawn(paths.clone());
         // ══════════ MY-STATS-API PATCH 3 (spawn) END ══════════
+        // ══════════ RATE-RECORDER PATCH 4 (init) START ══════════
+        // 速率旁路记录器初始化：CLI/GUI 唯一共同装配点，仅记录路径（不开池）。
+        token_proxy_runtime::proxy::rate_recorder::init(&paths);
+        // ══════════ RATE-RECORDER PATCH 4 (init) END ══════════
         Ok(Self {
             paths,
             logging,

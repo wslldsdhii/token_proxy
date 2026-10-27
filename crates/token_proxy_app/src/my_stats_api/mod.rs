@@ -2,8 +2,10 @@
 //!
 //! 恢复指南见 `crates/token_proxy_config/src/my_stats_api/MY-STATS-API-PATCHES.md`。
 //! 职责：在 CLI/GUI 汇聚的装配层（`TokenProxyApp::open` 末尾）启动一个独立线程 +
-//! 自建 current_thread tokio runtime 的 axum 服务，暴露三个只读端点：
-//! `GET /max_id`、`GET /rows?afterId&limit`、`GET /attribution?cid`。
+//! 自建 current_thread tokio runtime 的 axum 服务，暴露五个只读端点：
+//! `GET /max_id`、`GET /rows?afterId&limit`、`GET /attribution?cid`，
+//! 以及速率旁路库（rate.db）的 `GET /rate_max_id`、`GET /rate_rows?afterId&limit`
+//! （RATE-RECORDER PATCH，camelCase 契约与既有端点一致）。
 //! 设置与鉴权判定在 `token_proxy_config::my_stats_api`（token reload 即生效）；
 //! 数据源为 `request_logs` 表本身（含错误行与 `is_billable=0` 行，过滤口径在消费方）。
 
@@ -18,8 +20,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+use std::path::PathBuf;
 use token_proxy_account_store::paths::TokenProxyPaths;
 use token_proxy_config::my_stats_api::{auth_ok, current_settings};
+use token_proxy_storage::rate::{self, RateRow};
 
 const DEFAULT_ROW_LIMIT: i64 = 500;
 const MAX_ROW_LIMIT: i64 = 2000;
@@ -75,12 +79,20 @@ async fn serve(paths: Arc<TokenProxyPaths>) {
             return;
         }
     };
+    let state = AppState {
+        main: pool,
+        rate_db_path: paths.rate_db_path(),
+    };
     let router = Router::new()
         .route("/max_id", get(max_id))
         .route("/rows", get(rows))
         .route("/attribution", get(attribution))
+        // ══════════ RATE-RECORDER PATCH (routes) START ══════════
+        .route("/rate_max_id", get(rate_max_id))
+        .route("/rate_rows", get(rate_rows))
+        // ══════════ RATE-RECORDER PATCH (routes) END ══════════
         .layer(middleware::from_fn(auth_middleware))
-        .with_state(pool);
+        .with_state(state);
     match tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await {
         Ok(listener) => {
             tracing::info!(addr = %settings.host, port = settings.port, "my-stats-api 已启动");
@@ -118,6 +130,13 @@ fn query_token(req: &Request) -> Option<String> {
             (key == "token").then(|| value.to_string())
         })
     })
+}
+
+/// 路由状态：主库只读池 + rate.db 路径（rate 端点惰性开池，未启用时降级空响应）。
+#[derive(Clone)]
+struct AppState {
+    main: sqlx::SqlitePool,
+    rate_db_path: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -181,7 +200,8 @@ fn map_row(row: sqlx::sqlite::SqliteRow) -> Option<StatsRow> {
     })
 }
 
-async fn max_id(State(pool): State<sqlx::SqlitePool>) -> Response {
+async fn max_id(State(state): State<AppState>) -> Response {
+    let pool = state.main;
     match sqlx::query("SELECT COALESCE(MAX(id), 0) AS max_id FROM request_logs")
         .fetch_one(&pool)
         .await
@@ -195,9 +215,10 @@ async fn max_id(State(pool): State<sqlx::SqlitePool>) -> Response {
 }
 
 async fn rows(
-    State(pool): State<sqlx::SqlitePool>,
+    State(state): State<AppState>,
     Query(query): Query<RowsQuery>,
 ) -> Response {
+    let pool = state.main;
     let limit = query.limit.unwrap_or(DEFAULT_ROW_LIMIT).clamp(1, MAX_ROW_LIMIT);
     let after_id = query.after_id.unwrap_or(0);
     let list = sqlx::query(
@@ -228,9 +249,10 @@ async fn rows(
 }
 
 async fn attribution(
-    State(pool): State<sqlx::SqlitePool>,
+    State(state): State<AppState>,
     Query(query): Query<AttributionQuery>,
 ) -> Response {
+    let pool = state.main;
     let row = sqlx::query(
         "SELECT id, ts_ms, provider, upstream_id, model, mapped_model, status, is_billable, \
          client_request_id, attempt_index, uncached_input_tokens, cache_read_tokens, \
@@ -255,3 +277,85 @@ fn internal_error(err: sqlx::Error) -> Response {
     tracing::error!(error = %err, "my-stats-api 查询失败");
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "query failed"}))).into_response()
 }
+
+// ══════════ RATE-RECORDER PATCH (rate endpoints) START ══════════
+
+/// `/rate_rows` 响应行（camelCase，契约对齐既有 `/rows`）。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RateStatsRow {
+    id: i64,
+    client_request_id: Option<String>,
+    attempt_index: i64,
+    model: Option<String>,
+    provider: String,
+    upstream_id: String,
+    stream: bool,
+    status: i64,
+    started_ts_ms: i64,
+    upstream_first_chunk_ts_ms: Option<i64>,
+    first_output_ts_ms: Option<i64>,
+    ended_ts_ms: i64,
+    output_tokens: i64,
+}
+
+impl From<RateRow> for RateStatsRow {
+    fn from(row: RateRow) -> Self {
+        Self {
+            id: row.id,
+            client_request_id: row.client_request_id,
+            attempt_index: row.attempt_index,
+            model: row.model,
+            provider: row.provider,
+            upstream_id: row.upstream_id,
+            stream: row.stream,
+            status: row.status,
+            started_ts_ms: row.started_ts_ms,
+            upstream_first_chunk_ts_ms: row.upstream_first_chunk_ts_ms,
+            first_output_ts_ms: row.first_output_ts_ms,
+            ended_ts_ms: row.ended_ts_ms,
+            output_tokens: row.output_tokens,
+        }
+    }
+}
+
+/// rate.db 只读池；库文件不存在（记录从未启用）时返回 None → 端点降级空响应。
+async fn rate_pool_if_any(state: &AppState) -> Option<sqlx::SqlitePool> {
+    rate::open_rate_read_pool_if_exists(&state.rate_db_path).await
+}
+
+async fn rate_max_id(State(state): State<AppState>) -> Response {
+    let Some(pool) = rate_pool_if_any(&state).await else {
+        return Json(json!({ "maxId": 0 })).into_response();
+    };
+    match rate::max_rate_id(&pool).await {
+        Ok(max_id) => Json(json!({ "maxId": max_id })).into_response(),
+        Err(err) => internal_error(err),
+    }
+}
+
+async fn rate_rows(
+    State(state): State<AppState>,
+    Query(query): Query<RowsQuery>,
+) -> Response {
+    let limit = query.limit.unwrap_or(DEFAULT_ROW_LIMIT).clamp(1, MAX_ROW_LIMIT);
+    let after_id = query.after_id.unwrap_or(0);
+    let Some(pool) = rate_pool_if_any(&state).await else {
+        return Json(json!({ "maxId": 0, "rows": [] })).into_response();
+    };
+    match rate::select_rate_rows_after(&pool, after_id, limit).await {
+        Ok(rows) => {
+            let payload: Vec<RateStatsRow> = rows.into_iter().map(Into::into).collect();
+            // maxId 恒为源表当前 MAX(id)（与本批次行数无关），消费方拉空即知已追平。
+            let max_id = rate::max_rate_id(&pool).await.unwrap_or(0);
+            Json(json!({ "maxId": max_id, "rows": payload })).into_response()
+        }
+        Err(err) => internal_error(err),
+    }
+}
+
+// ══════════ RATE-RECORDER PATCH (rate endpoints) END ══════════
+
+#[cfg(test)]
+#[path = "rate_endpoints.test.rs"]
+mod rate_endpoints_tests;

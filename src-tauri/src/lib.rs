@@ -8,6 +8,9 @@ mod kiro;
 mod logging;
 // ══════════ MY-PROXY-ENDPOINT PATCH 3 (mod) START ══════════
 mod my_proxy_endpoint;
+// ══════════ MY-MODEL-MAPPING-PANEL PATCH 1 (mod) START ══════════
+mod my_model_mapping_panel;
+// ══════════ MY-MODEL-MAPPING-PANEL PATCH 1 (mod) END ══════════
 // ══════════ MY-PROXY-ENDPOINT PATCH 3 (mod) END ══════════
 mod tray;
 mod window;
@@ -263,6 +266,10 @@ pub fn run() {
             // ══════════ MY-PROXY-ENDPOINT PATCH 4 (handler) START ══════════
             my_proxy_endpoint::my_proxy_endpoint_snapshot,
             my_proxy_endpoint::my_proxy_endpoint_select,
+            // ══════════ MY-MODEL-MAPPING-PANEL PATCH 2 (commands) START ══════════
+            my_model_mapping_panel::model_mapping_panel_data,
+            my_model_mapping_panel::model_mapping_panel_set_columns,
+            // ══════════ MY-MODEL-MAPPING-PANEL PATCH 2 (commands) END ══════════
             // ══════════ MY-PROXY-ENDPOINT PATCH 4 (handler) END ══════════
             write_claude_code_settings,
             write_codex_config,

@@ -6,6 +6,9 @@
 pub mod dashboard;
 pub mod log;
 pub mod logs;
+// ══════════ RATE-RECORDER PATCH 0 (module) START ══════════
+pub mod rate;
+// ══════════ RATE-RECORDER PATCH 0 (module) END ══════════
 pub mod pricing;
 pub mod sqlite;
 pub mod usage;

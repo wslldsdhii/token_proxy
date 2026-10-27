@@ -14,6 +14,12 @@ pub mod my_stats_api;
 // ══════════ MY-PROXY-ENDPOINT PATCH 1 (mod) START ══════════
 pub mod my_proxy_endpoint;
 // ══════════ MY-PROXY-ENDPOINT PATCH 1 (mod) END ══════════
+// ══════════ RATE-RECORDER PATCH 1 (mod) START ══════════
+pub mod rate_recorder;
+// ══════════ RATE-RECORDER PATCH 1 (mod) END ══════════
+// ══════════ MY-MODEL-MAPPING-PANEL PATCH 1 (mod) START ══════════
+pub mod my_model_mapping_panel;
+// ══════════ MY-MODEL-MAPPING-PANEL PATCH 1 (mod) END ══════════
 mod normalize;
 mod types;
 
@@ -95,6 +101,9 @@ fn build_runtime_config(config: ProxyConfigFile) -> Result<ProxyConfig, String> 
     // ══════════ MY-STATS-API PATCH 1 (sync) START ══════════
     let _ = my_stats_api::sync_settings(&config);
     // ══════════ MY-STATS-API PATCH 1 (sync) END ══════════
+    // ══════════ RATE-RECORDER PATCH 2 (sync) START ══════════
+    let _ = rate_recorder::sync_settings(&config);
+    // ══════════ RATE-RECORDER PATCH 2 (sync) END ══════════
     let log_level = config.log_level;
     let max_request_body_bytes = resolve_max_request_body_bytes(config.max_request_body_bytes);
     let app_proxy_url = normalize_app_proxy_url(config.app_proxy_url.as_deref())?;

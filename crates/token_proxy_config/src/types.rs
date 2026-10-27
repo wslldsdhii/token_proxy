@@ -400,6 +400,20 @@ pub struct ProxyConfigFile {
     )]
     pub my_proxy_endpoint: Option<crate::my_proxy_endpoint::MyProxyEndpointSection>,
     // ══════════ MY-PROXY-ENDPOINT PATCH 2 (field) END ══════════
+    // ══════════ RATE-RECORDER PATCH 3 (field) START ══════════
+    /// 本地增强：请求级速率旁路记录（rate.db）的配置段（rate_recorder 模块）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_recorder: Option<crate::rate_recorder::RateRecorderSection>,
+    // ══════════ RATE-RECORDER PATCH 3 (field) END ══════════
+    // ══════════ MY-MODEL-MAPPING-PANEL PATCH 2 (field) START ══════════
+    /// 本地增强：仪表盘「模型映射」面板列显示持久化段（my_model_mapping_panel 模块）。
+    #[serde(
+        default,
+        deserialize_with = "crate::my_model_mapping_panel::de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub my_model_mapping_panel: Option<crate::my_model_mapping_panel::MyModelMappingPanelSection>,
+    // ══════════ MY-MODEL-MAPPING-PANEL PATCH 2 (field) END ══════════
 }
 
 impl Default for ProxyConfigFile {
@@ -428,6 +442,12 @@ impl Default for ProxyConfigFile {
             upstreams: Vec::new(),
             // ══════════ MY-STATS-API PATCH 2 (default) START ══════════
             my_stats_api: None,
+            // ══════════ RATE-RECORDER PATCH 3 (default) START ══════════
+            rate_recorder: None,
+            // ══════════ RATE-RECORDER PATCH 3 (default) END ══════════
+            // ══════════ MY-MODEL-MAPPING-PANEL PATCH 2 (default) START ══════════
+            my_model_mapping_panel: None,
+            // ══════════ MY-MODEL-MAPPING-PANEL PATCH 2 (default) END ══════════
             // ══════════ MY-STATS-API PATCH 2 (default) END ══════════
             // ══════════ MY-PROXY-ENDPOINT PATCH 2 (default) START ══════════
             my_proxy_endpoint: None,

@@ -6,6 +6,10 @@ pub const DB_FILE_NAME: &str = "data.db";
 pub const DB_WAL_FILE_NAME: &str = "data.db-wal";
 /// SQLite shared-memory 旁路文件；计入数据库占用。
 pub const DB_SHM_FILE_NAME: &str = "data.db-shm";
+// ══════════ RATE-RECORDER PATCH 1 (path) START ══════════
+/// 请求级速率旁路记录库（fork 本地增强）；与 data.db 同数据目录。
+pub const RATE_DB_FILE_NAME: &str = "rate.db";
+// ══════════ RATE-RECORDER PATCH 1 (path) END ══════════
 
 /// Token Proxy 的路径集合（Ports & Adapters 的最小“路径端口”）。
 ///
@@ -66,4 +70,11 @@ impl TokenProxyPaths {
     pub fn sqlite_db_path(&self) -> PathBuf {
         self.data_dir.join(DB_FILE_NAME)
     }
+
+    // ══════════ RATE-RECORDER PATCH 1 (path) START ══════════
+    /// 速率旁路库路径：`{data_dir}/rate.db`（与主库同目录的独立库）。
+    pub fn rate_db_path(&self) -> PathBuf {
+        self.data_dir.join(RATE_DB_FILE_NAME)
+    }
+    // ══════════ RATE-RECORDER PATCH 1 (path) END ══════════
 }

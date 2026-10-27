@@ -91,6 +91,50 @@ describe("nextSortDirection", () => {
   });
 });
 
+describe("渠道启用状态过滤", () => {
+  const mixed: MappingPanelUpstream[] = [
+    {
+      id: "on-a",
+      enabled: true,
+      providers: ["openai"],
+      mappings: [{ pattern: "p1", target: "t1" }],
+    },
+    {
+      id: "off-b",
+      enabled: false,
+      providers: ["openai"],
+      mappings: [{ pattern: "p2", target: "t2" }],
+    },
+    { id: "legacy-c", providers: ["openai"], mappings: [{ pattern: "p3", target: "t3" }] },
+  ];
+
+  it("默认仅启用：禁用渠道的行与菜单项不出现", () => {
+    const rows = buildRows(mixed);
+    expect(filterRows(rows, "", [], true).map((r) => r.upstream)).toEqual(["on-a", "legacy-c"]);
+    expect(collectUpstreamOptions(mixed, true)).toEqual(["on-a", "legacy-c"]);
+  });
+
+  it("取消勾选显示全部（含禁用）", () => {
+    const rows = buildRows(mixed);
+    expect(filterRows(rows, "", [], false).map((r) => r.upstream)).toEqual([
+      "on-a",
+      "off-b",
+      "legacy-c",
+    ]);
+    expect(collectUpstreamOptions(mixed, false)).toEqual(["on-a", "off-b", "legacy-c"]);
+  });
+
+  it("与搜索组合：禁用渠道被启用过滤先行排除", () => {
+    const rows = buildRows(mixed);
+    expect(filterRows(rows, "p2", [], true)).toHaveLength(0);
+    expect(filterRows(rows, "p2", [], false).map((r) => r.upstream)).toEqual(["off-b"]);
+  });
+
+  it("旧 DTO 缺省 enabled 字段按启用处理", () => {
+    expect(buildRows(mixed).find((r) => r.upstream === "legacy-c")?.enabled).toBe(true);
+  });
+});
+
 describe("fuzzyMatch", () => {
   it("空查询恒匹配", () => {
     expect(fuzzyMatch("anything", "")).toBe(true);

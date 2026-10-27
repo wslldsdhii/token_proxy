@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -56,6 +57,7 @@ export function ModelMappingPanel() {
   const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedUpstreams, setSelectedUpstreams] = useState<string[]>([]);
+  const [onlyEnabled, setOnlyEnabled] = useState(true);
   const [upstreamMenuSearch, setUpstreamMenuSearch] = useState("");
   const [sortColumn, setSortColumn] = useState<SortableColumnId | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -110,10 +112,14 @@ export function ModelMappingPanel() {
   };
 
   const rows = useMemo(() => buildRows(data?.upstreams ?? []), [data]);
-  const upstreamOptions = useMemo(() => collectUpstreamOptions(data?.upstreams ?? []), [data]);
+  const upstreamOptions = useMemo(
+    () => collectUpstreamOptions(data?.upstreams ?? [], onlyEnabled),
+    [data, onlyEnabled]
+  );
   const visibleRows = useMemo(
-    () => sortRows(filterRows(rows, search, selectedUpstreams), sortColumn, sortDirection),
-    [rows, search, selectedUpstreams, sortColumn, sortDirection]
+    () =>
+      sortRows(filterRows(rows, search, selectedUpstreams, onlyEnabled), sortColumn, sortDirection),
+    [rows, search, selectedUpstreams, onlyEnabled, sortColumn, sortDirection]
   );
   const filteredUpstreamOptions = useMemo(
     () => upstreamOptions.filter((option) => fuzzyMatch(option, upstreamMenuSearch)),
@@ -253,6 +259,17 @@ export function ModelMappingPanel() {
                 ) : (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
+                      <label
+                        className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground"
+                        data-testid="mapping-only-enabled"
+                      >
+                        <Checkbox
+                          checked={onlyEnabled}
+                          onCheckedChange={(checked) => setOnlyEnabled(checked === true)}
+                          aria-label={m.my_model_mapping_panel_only_enabled()}
+                        />
+                        {m.my_model_mapping_panel_only_enabled()}
+                      </label>
                       <div className="relative min-w-0 flex-1 sm:max-w-xs">
                         <Search
                           className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"

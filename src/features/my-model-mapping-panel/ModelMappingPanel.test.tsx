@@ -128,6 +128,27 @@ describe("my-model-mapping-panel", () => {
     await waitFor(() => expect(screen.getByText("p1")).toBeTruthy());
   });
 
+  it("「仅启用」默认勾选只显示启用渠道，取消后显示全部", async () => {
+    readMock.mockResolvedValue(
+      panelData({
+        upstreams: [
+          { id: "on-a", enabled: true, providers: ["openai"], mappings: [{ pattern: "p1", target: "t1" }] },
+          { id: "off-b", enabled: false, providers: ["openai"], mappings: [{ pattern: "p2", target: "t2" }] },
+        ],
+      }),
+    );
+    renderPanel();
+    await expand();
+    await screen.findByText("p1");
+    expect(screen.queryByText("p2")).toBeNull(); // 禁用渠道默认不显示
+
+    const toggle = screen.getByTestId("mapping-only-enabled");
+    const checkbox = toggle.querySelector("button[role=checkbox]") as HTMLElement;
+    await userEvent.click(checkbox);
+    // 取消勾选后显示全部
+    await waitFor(() => expect(screen.getByText("p2")).toBeTruthy());
+  });
+
   it("持久化的隐藏列在加载后生效（target 列不渲染）", async () => {
     readMock.mockResolvedValue(panelData({ hiddenColumns: ["target"] }));
     renderPanel();

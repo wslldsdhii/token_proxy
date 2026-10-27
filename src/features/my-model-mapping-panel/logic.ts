@@ -25,25 +25,33 @@ export function buildRows(upstreams: readonly MappingPanelUpstream[]): MappingRo
         upstream: upstream.id,
         target: mapping.target,
         providers: upstream.providers,
+        enabled: upstream.enabled !== false,
       });
     }
   }
   return rows;
 }
 
-/** 渠道筛选选项：仅含有映射配置的渠道（与行集合同源）。 */
-export function collectUpstreamOptions(upstreams: readonly MappingPanelUpstream[]): string[] {
-  return upstreams.filter((u) => u.mappings.length > 0).map((u) => u.id);
+/** 渠道筛选选项：仅含有映射配置的渠道；onlyEnabled 时仅启用渠道（与行集合同源）。 */
+export function collectUpstreamOptions(
+  upstreams: readonly MappingPanelUpstream[],
+  onlyEnabled = true
+): string[] {
+  return upstreams
+    .filter((u) => u.mappings.length > 0 && (!onlyEnabled || u.enabled !== false))
+    .map((u) => u.id);
 }
 
-/** 组合筛选：搜索词命中（alias OR target）AND 渠道多选（OR，空选=全部）。 */
+/** 组合筛选：仅启用（可选）AND 搜索词命中（alias OR target）AND 渠道多选（OR，空选=全部）。 */
 export function filterRows(
   rows: readonly MappingRow[],
   search: string,
-  selectedUpstreams: readonly string[]
+  selectedUpstreams: readonly string[],
+  onlyEnabled = true
 ): MappingRow[] {
   const selected = new Set(selectedUpstreams);
   return rows.filter((row) => {
+    if (onlyEnabled && !row.enabled) return false;
     if (selected.size > 0 && !selected.has(row.upstream)) return false;
     if (!fuzzyMatch(row.alias, search) && !fuzzyMatch(row.target, search)) return false;
     return true;

@@ -6,6 +6,8 @@ export type MappingPanelEntry = {
 
 export type MappingPanelUpstream = {
   id: string;
+  /** 渠道启用状态（读自 upstreams[].enabled）；旧 DTO 缺省按启用处理。 */
+  enabled?: boolean;
   providers: string[];
   mappings: MappingPanelEntry[];
 };
@@ -25,6 +27,8 @@ export type MappingRow = {
   target: string;
   /** 渠道支持的 api 类型（providers）。 */
   providers: string[];
+  /** 渠道启用状态（「仅启用」过滤维度）。 */
+  enabled: boolean;
 };
 
 /** 可隐藏数据列 id（编号与复制按钮列恒显）。 */

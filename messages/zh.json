@@ -741,5 +741,6 @@
   "my_model_mapping_panel_persist_failed": "列显示状态保存失败",
   "my_model_mapping_panel_load_failed": "映射配置加载失败",
   "my_model_mapping_panel_empty": "没有渠道配置模型映射",
-  "my_model_mapping_panel_empty_filtered": "无匹配结果"
+  "my_model_mapping_panel_empty_filtered": "无匹配结果",
+  "my_model_mapping_panel_only_enabled": "仅启用"
 }

@@ -29,6 +29,8 @@ pub(crate) struct MappingPanelEntry {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MappingPanelUpstream {
     id: String,
+    /// 渠道启用状态（读自 upstreams[].enabled；面板「仅启用」过滤维度）。
+    enabled: bool,
     providers: Vec<String>,
     mappings: Vec<MappingPanelEntry>,
 }
@@ -63,6 +65,7 @@ pub(crate) async fn model_mapping_panel_data(
         .filter(|upstream| !upstream.model_mappings.is_empty())
         .map(|upstream| MappingPanelUpstream {
             id: upstream.id.clone(),
+            enabled: upstream.enabled,
             providers: upstream.providers.clone(),
             mappings: upstream
                 .model_mappings

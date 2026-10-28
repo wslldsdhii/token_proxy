@@ -2,7 +2,8 @@ use axum::{
     body::Bytes,
     http::{HeaderMap, StatusCode},
 };
-use serde_json::{json, Map, Value};
+use serde_json::{json, value::RawValue, Map, Value};
+use std::collections::BTreeMap;
 
 use super::super::{
     config::UpstreamRuntime, http, model, request_body::ReplayableBody, RequestMeta,
@@ -14,8 +15,11 @@ const OPENAI_CHAT_PATH: &str = "/v1/chat/completions";
 const OPENAI_RESPONSES_PATH: &str = "/v1/responses";
 const ANTHROPIC_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
 const ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
+/// 仅模型映射场景下「Value 路径 ↔ 借用式快路径」的分界阈值；改写本身的大小上限
+/// 统一走配置的入站上限 `max_request_body_bytes`（filter_limit_bytes，默认 100MB）。
 const REQUEST_MODEL_MAPPING_LIMIT_BYTES: usize = 4 * 1024 * 1024;
-/// 默认 JSON 过滤/转换上限；运行时用配置 `max_request_body_bytes` 覆盖。
+/// 测试辅助用的 JSON 过滤/转换上限；运行时统一用配置 `max_request_body_bytes`。
+#[cfg(test)]
 const DEFAULT_JSON_TRANSFORM_LIMIT_BYTES: usize = 100 * 1024 * 1024;
 const CODEX_INSTALLATION_ID_KEY: &str = "x-codex-installation-id";
 const CODEX_RESPONSES_LITE_HEADER: &str = "x-openai-internal-codex-responses-lite";
@@ -129,53 +133,93 @@ async fn build_json_transformed_body_with_headers(
     filter_limit_bytes: usize,
 ) -> Result<Option<ReplayableBody>, AttemptOutcome> {
     let upstream_path = split_path_query(upstream_path_with_query).0;
-    if !needs_json_transform(
-        provider,
-        upstream,
-        upstream_path,
-        meta,
-        codex_openai_device_id,
-        request_headers,
-    ) {
+    let needs_model_mapping = meta.model_override().is_some() && meta.mapped_model.is_some();
+    let needs_anthropic_model = should_normalize_anthropic_model(provider, upstream_path, meta);
+    let needs_reasoning_effort = should_apply_reasoning_effort(provider, upstream_path, meta);
+    let needs_responses_fields =
+        should_filter_openai_responses_fields(provider, upstream, upstream_path);
+    let needs_sanitize_input =
+        should_sanitize_native_openai_responses_input(provider, upstream_path);
+    let needs_xai_filter = should_filter_xai_responses_request(provider, upstream_path);
+    let needs_xai_image_refs = should_normalize_xai_image_refs(provider);
+    let needs_sampling_strip =
+        should_strip_openai_responses_sampling_params(provider, upstream_path, meta);
+    let needs_developer_roles = should_rewrite_developer_roles(upstream, upstream_path);
+    let needs_count_tokens_filter =
+        should_filter_anthropic_count_tokens_request(provider, upstream_path);
+    let needs_codex_installation_id =
+        should_inject_codex_installation_id(provider, codex_openai_device_id);
+    let needs_codex_lite =
+        should_inspect_codex_responses_lite(provider, upstream_path, request_headers);
+
+    let needs_transform = needs_model_mapping
+        || needs_anthropic_model
+        || needs_reasoning_effort
+        || needs_responses_fields
+        || needs_sanitize_input
+        || needs_xai_filter
+        || needs_xai_image_refs
+        || needs_sampling_strip
+        || needs_developer_roles
+        || needs_count_tokens_filter
+        || needs_codex_installation_id
+        || needs_codex_lite;
+    if !needs_transform {
         return Ok(None);
     }
 
-    let must_strip_sampling =
-        should_strip_openai_responses_sampling_params(provider, upstream_path, meta);
-    let must_filter_xai = should_filter_xai_responses_request(provider, upstream_path);
-    let must_sanitize_responses_input =
-        should_sanitize_native_openai_responses_input(provider, upstream_path);
-    let read_limit = json_transform_read_limit(
-        provider,
-        upstream,
-        upstream_path,
-        meta,
-        codex_openai_device_id,
-        request_headers,
-        filter_limit_bytes,
-    );
-    let Some(bytes) = body.read_bytes_if_small(read_limit).await.map_err(|err| {
+    // 大 body 且仅需模型映射时走借用式快路径：字段值保持对原始字节的切片引用、
+    // 不物化 Value 树（images/edits 等 base64 场景峰值内存从数倍 body 降为 2 倍）。
+    let needs_only_model_mapping = needs_model_mapping
+        && !needs_anthropic_model
+        && !needs_reasoning_effort
+        && !needs_responses_fields
+        && !needs_sanitize_input
+        && !needs_xai_filter
+        && !needs_xai_image_refs
+        && !needs_sampling_strip
+        && !needs_developer_roles
+        && !needs_count_tokens_filter
+        && !needs_codex_installation_id
+        && !needs_codex_lite;
+    if needs_only_model_mapping && body.as_bytes().len() > REQUEST_MODEL_MAPPING_LIMIT_BYTES {
+        return rewrite_model_mapping_borrowed(body, meta, filter_limit_bytes).await;
+    }
+
+    let Some(bytes) = body.read_bytes_if_small(filter_limit_bytes).await.map_err(|err| {
         AttemptOutcome::Fatal(http::error_response(
             StatusCode::BAD_GATEWAY,
             format!("Failed to read cached request body: {err}"),
         ))
     })?
     else {
-        if must_strip_sampling {
+        if needs_model_mapping {
+            tracing::warn!(
+                body_limit = filter_limit_bytes,
+                "model mapping skipped: request body exceeds transform limit"
+            );
+        }
+        if needs_sampling_strip {
             return Err(openai_responses_sampling_params_payload_too_large(
                 filter_limit_bytes,
             ));
         }
-        if must_filter_xai {
+        if needs_xai_filter {
             return Err(xai_responses_payload_too_large(filter_limit_bytes));
         }
-        if must_sanitize_responses_input {
+        if needs_sanitize_input {
             return Err(openai_responses_input_payload_too_large(filter_limit_bytes));
         }
         return Ok(None);
     };
 
     let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
+        if needs_model_mapping {
+            tracing::warn!(
+                body_len = bytes.len(),
+                "model mapping skipped: request body is not valid JSON"
+            );
+        }
         return Ok(None);
     };
     let Some(object) = value.as_object_mut() else {
@@ -184,8 +228,15 @@ async fn build_json_transformed_body_with_headers(
 
     let mut changed = false;
     let body_len = bytes.len();
-    changed |= normalize_anthropic_model(provider, upstream_path, object, meta, body_len);
-    changed |= rewrite_model_mapping(object, meta, body_len);
+    changed |= normalize_anthropic_model(
+        provider,
+        upstream_path,
+        object,
+        meta,
+        body_len,
+        filter_limit_bytes,
+    );
+    changed |= rewrite_model_mapping(object, meta, body_len, filter_limit_bytes);
     changed |= apply_reasoning_effort(
         provider,
         upstream_path,
@@ -233,7 +284,7 @@ async fn build_json_transformed_body_with_headers(
         object,
         meta,
         body_len,
-        must_strip_sampling,
+        needs_sampling_strip,
         filter_limit_bytes,
     )?;
     changed |= rewrite_developer_roles_if_needed(
@@ -256,61 +307,6 @@ async fn build_json_transformed_body_with_headers(
     }
 
     replayable_from_json(value).map(Some)
-}
-
-fn json_transform_read_limit(
-    provider: &str,
-    upstream: &UpstreamRuntime,
-    upstream_path: &str,
-    meta: &RequestMeta,
-    codex_openai_device_id: Option<&str>,
-    request_headers: &HeaderMap,
-    filter_limit_bytes: usize,
-) -> usize {
-    let mut limit = 0usize;
-    if meta.model_override().is_some() && meta.mapped_model.is_some() {
-        limit = limit.max(REQUEST_MODEL_MAPPING_LIMIT_BYTES);
-    }
-    if should_normalize_anthropic_model(provider, upstream_path, meta) {
-        limit = limit.max(REQUEST_MODEL_MAPPING_LIMIT_BYTES);
-    }
-    // 其余 JSON 改写都受配置的入站上限约束。
-    if should_apply_reasoning_effort(provider, upstream_path, meta)
-        || should_filter_openai_responses_fields(provider, upstream, upstream_path)
-        || should_sanitize_native_openai_responses_input(provider, upstream_path)
-        || should_filter_xai_responses_request(provider, upstream_path)
-        || should_normalize_xai_image_refs(provider)
-        || should_strip_openai_responses_sampling_params(provider, upstream_path, meta)
-        || should_rewrite_developer_roles(upstream, upstream_path)
-        || should_filter_anthropic_count_tokens_request(provider, upstream_path)
-        || should_inject_codex_installation_id(provider, codex_openai_device_id)
-        || should_inspect_codex_responses_lite(provider, upstream_path, request_headers)
-    {
-        limit = limit.max(filter_limit_bytes);
-    }
-    limit
-}
-
-fn needs_json_transform(
-    provider: &str,
-    upstream: &UpstreamRuntime,
-    upstream_path: &str,
-    meta: &RequestMeta,
-    codex_openai_device_id: Option<&str>,
-    request_headers: &HeaderMap,
-) -> bool {
-    (meta.model_override().is_some() && meta.mapped_model.is_some())
-        || should_normalize_anthropic_model(provider, upstream_path, meta)
-        || should_apply_reasoning_effort(provider, upstream_path, meta)
-        || should_filter_openai_responses_fields(provider, upstream, upstream_path)
-        || should_sanitize_native_openai_responses_input(provider, upstream_path)
-        || should_filter_xai_responses_request(provider, upstream_path)
-        || should_normalize_xai_image_refs(provider)
-        || should_strip_openai_responses_sampling_params(provider, upstream_path, meta)
-        || should_rewrite_developer_roles(upstream, upstream_path)
-        || should_filter_anthropic_count_tokens_request(provider, upstream_path)
-        || should_inject_codex_installation_id(provider, codex_openai_device_id)
-        || should_inspect_codex_responses_lite(provider, upstream_path, request_headers)
 }
 
 fn should_inspect_codex_responses_lite(
@@ -385,8 +381,9 @@ fn normalize_anthropic_model(
     object: &mut Map<String, Value>,
     meta: &RequestMeta,
     body_len: usize,
+    filter_limit_bytes: usize,
 ) -> bool {
-    if body_len > REQUEST_MODEL_MAPPING_LIMIT_BYTES
+    if body_len > filter_limit_bytes
         || !should_normalize_anthropic_model(provider, upstream_path, meta)
     {
         return false;
@@ -416,12 +413,72 @@ fn normalize_anthropic_model(
     true
 }
 
+/// 仅模型映射场景的借用式改写：`BTreeMap<&str, &RawValue>` 让各字段值保持对原始 body
+/// 的切片引用（零拷贝），只替换顶层 `model` 后重新序列化，避免把整个大 body 物化成
+/// Value 树（瞬时内存数倍 body）。键序为 BTreeMap 字母序，与 Value 路径输出一致。
+/// 非 JSON body（如 multipart）按既有语义原样透传。
+async fn rewrite_model_mapping_borrowed(
+    body: &ReplayableBody,
+    meta: &RequestMeta,
+    filter_limit_bytes: usize,
+) -> Result<Option<ReplayableBody>, AttemptOutcome> {
+    let Some(bytes) = body.read_bytes_if_small(filter_limit_bytes).await.map_err(|err| {
+        AttemptOutcome::Fatal(http::error_response(
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to read cached request body: {err}"),
+        ))
+    })?
+    else {
+        tracing::warn!(
+            body_limit = filter_limit_bytes,
+            "model mapping skipped: request body exceeds transform limit"
+        );
+        return Ok(None);
+    };
+    let Ok(mut map) = serde_json::from_slice::<BTreeMap<&str, &RawValue>>(&bytes) else {
+        tracing::warn!(
+            body_len = bytes.len(),
+            "model mapping skipped: request body is not a JSON object"
+        );
+        return Ok(None);
+    };
+    let Some(mapped_model) = meta.mapped_model.as_deref() else {
+        return Ok(None);
+    };
+    if !map.contains_key("model") {
+        return Ok(None);
+    }
+    let replacement = serde_json::to_string(mapped_model)
+        .and_then(|json| RawValue::from_string(json))
+        .map_err(|err| {
+            AttemptOutcome::Fatal(http::error_response(
+                StatusCode::BAD_GATEWAY,
+                format!("Failed to serialize mapped model: {err}"),
+            ))
+        })?;
+    map.insert("model", &*replacement);
+    let outbound_bytes = serde_json::to_vec(&map)
+        .map(Bytes::from)
+        .map_err(|err| {
+            AttemptOutcome::Fatal(http::error_response(
+                StatusCode::BAD_GATEWAY,
+                format!("Failed to serialize request: {err}"),
+            ))
+        })?;
+    tracing::debug!(
+        body_len = bytes.len(),
+        "rewrote model mapping via borrowed raw map"
+    );
+    Ok(Some(ReplayableBody::from_bytes(outbound_bytes)))
+}
+
 fn rewrite_model_mapping(
     object: &mut Map<String, Value>,
     meta: &RequestMeta,
     body_len: usize,
+    filter_limit_bytes: usize,
 ) -> bool {
-    if body_len > REQUEST_MODEL_MAPPING_LIMIT_BYTES {
+    if body_len > filter_limit_bytes {
         return false;
     }
     if meta.model_override().is_none() {

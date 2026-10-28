@@ -1348,3 +1348,146 @@ async fn preserves_existing_codex_installation_id() {
 
     assert!(rewritten.is_none());
 }
+
+// ══════════ fix-model-mapping-large-body：大 body 模型映射测试 ══════════
+
+fn mapped_meta(original: &str, mapped: &str, reasoning_effort: Option<&str>) -> RequestMeta {
+    RequestMeta {
+        client_ip: None,
+        stream: false,
+        original_model: Some(original.to_string()),
+        mapped_model: Some(mapped.to_string()),
+        reasoning_effort: reasoning_effort.map(str::to_string),
+        response_format: None,
+        estimated_input_tokens: None,
+        billing: Default::default(),
+    }
+}
+
+fn large_mapped_body_json(padding_len: usize) -> Bytes {
+    let padding = "A".repeat(padding_len);
+    Bytes::from(format!(
+        r#"{{"model":"gpt-image-2-TH-proxy","prompt":"watercolor","image":["data:image/png;base64,{padding}"]}}"#
+    ))
+}
+
+async fn transformed_bytes(
+    provider: &str,
+    upstream: &UpstreamRuntime,
+    path: &str,
+    body: &ReplayableBody,
+    meta: &RequestMeta,
+) -> Result<Option<Value>, &'static str> {
+    let transformed = build_json_transformed_body(provider, upstream, path, body, meta, None)
+        .await
+        .map_err(|_| "transform failed")?;
+    match transformed {
+        None => Ok(None),
+        Some(replayable) => {
+            let bytes = replayable
+                .read_bytes_if_small(DEFAULT_JSON_TRANSFORM_LIMIT_BYTES)
+                .await
+                .expect("read transformed body")
+                .expect("transformed bytes within limit");
+            Ok(Some(
+                serde_json::from_slice(&bytes).expect("transformed JSON"),
+            ))
+        }
+    }
+}
+
+#[tokio::test]
+async fn model_mapping_fast_path_rewrites_large_body_model() {
+    let upstream = test_upstream(false, false, false);
+    let payload = large_mapped_body_json(4_500_000);
+    assert!(payload.len() > REQUEST_MODEL_MAPPING_LIMIT_BYTES);
+    let body = ReplayableBody::from_bytes(payload);
+    let meta = mapped_meta("gpt-image-2-TH-proxy", "gpt-image-2", None);
+
+    let value = transformed_bytes("openai", &upstream, "/v1/images/edits", &body, &meta)
+        .await
+        .expect("fast path transform")
+        .expect("model should be rewritten");
+
+    assert_eq!(value["model"], "gpt-image-2");
+    assert_eq!(value["prompt"], "watercolor");
+    assert_eq!(value["image"][0].as_str().map(str::len), Some(4_500_000 + "data:image/png;base64,".len()));
+}
+
+#[tokio::test]
+async fn model_mapping_fast_path_passes_non_json_large_body_through() {
+    let upstream = test_upstream(false, false, false);
+    let payload = Bytes::from(format!("--boundary\r\nmodel\r\n{}", "A".repeat(4_500_000)));
+    let body = ReplayableBody::from_bytes(payload.clone());
+    let meta = mapped_meta("gpt-image-2-TH-proxy", "gpt-image-2", None);
+
+    let transformed =
+        match build_json_transformed_body("openai", &upstream, "/v1/images/edits", &body, &meta, None)
+            .await
+        {
+            Ok(value) => value,
+            Err(_) => panic!("passthrough should succeed"),
+        };
+
+    assert!(transformed.is_none());
+    assert_eq!(body.as_bytes(), &payload);
+}
+
+#[tokio::test]
+async fn model_mapping_fast_path_without_model_key_returns_none() {
+    let upstream = test_upstream(false, false, false);
+    let padding = "A".repeat(4_500_000);
+    let payload = Bytes::from(format!(r#"{{"prompt":"x","padding":"{padding}"}}"#));
+    let body = ReplayableBody::from_bytes(payload);
+    let meta = mapped_meta("gpt-image-2-TH-proxy", "gpt-image-2", None);
+
+    let transformed =
+        match build_json_transformed_body("openai", &upstream, "/v1/images/edits", &body, &meta, None)
+            .await
+        {
+            Ok(value) => value,
+            Err(_) => panic!("transform should succeed"),
+        };
+
+    assert!(transformed.is_none());
+}
+
+#[tokio::test]
+async fn model_mapping_and_reasoning_large_body_rewrites_via_value_path() {
+    let upstream = test_upstream(false, false, false);
+    let padding = "B".repeat(4_500_000);
+    let payload = Bytes::from(format!(
+        r#"{{"model":"gpt-image-2-TH-proxy","input":"hi","padding":"{padding}"}}"#
+    ));
+    assert!(payload.len() > REQUEST_MODEL_MAPPING_LIMIT_BYTES);
+    let body = ReplayableBody::from_bytes(payload);
+    let meta = mapped_meta("gpt-image-2-TH-proxy", "gpt-image-2", Some("medium"));
+
+    let value = transformed_bytes("openai-response", &upstream, "/v1/responses", &body, &meta)
+        .await
+        .expect("value path transform")
+        .expect("model and reasoning should be rewritten");
+
+    assert_eq!(value["model"], "gpt-image-2");
+    assert_eq!(value["reasoning"]["effort"], "medium");
+    assert_eq!(value["padding"].as_str().map(str::len), Some(4_500_000));
+}
+
+#[tokio::test]
+async fn model_mapping_small_body_still_rewritten() {
+    let upstream = test_upstream(false, false, false);
+    let payload = Bytes::from_static(
+        br#"{"model":"gpt-image-2-TH-proxy","prompt":"watercolor"}"#,
+    );
+    assert!(payload.len() <= REQUEST_MODEL_MAPPING_LIMIT_BYTES);
+    let body = ReplayableBody::from_bytes(payload);
+    let meta = mapped_meta("gpt-image-2-TH-proxy", "gpt-image-2", None);
+
+    let value = transformed_bytes("openai", &upstream, "/v1/images/generations", &body, &meta)
+        .await
+        .expect("value path transform")
+        .expect("model should be rewritten");
+
+    assert_eq!(value["model"], "gpt-image-2");
+    assert_eq!(value["prompt"], "watercolor");
+}

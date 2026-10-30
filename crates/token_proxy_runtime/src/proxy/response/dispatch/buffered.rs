@@ -216,6 +216,13 @@ pub(super) async fn build_buffered_response(
     log.clone().write_detached(entry);
 
     let output = maybe_override_response_model(output, model_override);
+    // ══════════ MY-MODEL-REWRITE-CL PATCH 1 START ══════════
+    // model 回写会重序列化 body（长度变化）；透传通道入口不剥 Content-Length，
+    // 此处必须移除过期头，交由 hyper 按实际 body 重算，否则客户端按旧 CL 截断读取。
+    if model_override.is_some() {
+        headers.remove(CONTENT_LENGTH);
+    }
+    // ══════════ MY-MODEL-REWRITE-CL PATCH 1 END ══════════
     log_debug_headers_body(
         "outbound.response",
         Some(&headers),

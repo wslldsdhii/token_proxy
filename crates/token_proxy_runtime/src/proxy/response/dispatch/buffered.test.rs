@@ -357,6 +357,98 @@ async fn buffered_responses_complete_error_preserves_body_and_content_length() {
 }
 
 #[tokio::test]
+async fn buffered_passthrough_model_override_strips_stale_content_length() {
+    let body = r#"{"id":"chatcmpl_1","object":"chat.completion","created":1770000000,"model":"glm-4.x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}"#;
+    let upstream_len = body.len().to_string();
+    let upstream_res = axum::http::Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/json")
+        .body(reqwest::Body::from(body))
+        .expect("response")
+        .into();
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&upstream_len).expect("content length"),
+    );
+    let tracker = TokenRateTracker::new().register(None, None).await;
+
+    let response = build_buffered_response(
+        StatusCode::OK,
+        upstream_res,
+        headers,
+        test_context(),
+        Arc::new(LogWriter::new(None)),
+        tracker,
+        FormatTransform::None,
+        None,
+        Some("glm-5.3-flash-plan-proxy"),
+        None,
+        None,
+        Duration::from_secs(1),
+    )
+    .await;
+    let (parts, body) = response.into_parts();
+    let body = to_bytes(body, usize::MAX).await.expect("body");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("json");
+
+    assert_eq!(parts.status, StatusCode::OK);
+    // 改写使 body 增长：过期 Content-Length 必须被移除，交由 hyper 重算。
+    assert!(parts.headers.get(CONTENT_LENGTH).is_none());
+    assert_eq!(value["model"], json!("glm-5.3-flash-plan-proxy"));
+    assert!(body.len() > upstream_len.parse::<usize>().expect("length"));
+}
+
+#[tokio::test]
+async fn buffered_passthrough_without_override_preserves_upstream_content_length() {
+    let body = r#"{"id":"chatcmpl_1","object":"chat.completion","created":1770000000,"model":"glm-5.3-flash-plan-proxy","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}"#;
+    let upstream_len = body.len().to_string();
+    let upstream_res = axum::http::Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/json")
+        .body(reqwest::Body::from(body))
+        .expect("response")
+        .into();
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&upstream_len).expect("content length"),
+    );
+    let tracker = TokenRateTracker::new().register(None, None).await;
+
+    let response = build_buffered_response(
+        StatusCode::OK,
+        upstream_res,
+        headers,
+        test_context(),
+        Arc::new(LogWriter::new(None)),
+        tracker,
+        FormatTransform::None,
+        None,
+        None,
+        None,
+        None,
+        Duration::from_secs(1),
+    )
+    .await;
+    let (parts, response_body) = response.into_parts();
+    let response_body = to_bytes(response_body, usize::MAX).await.expect("body");
+
+    // 未触发回写：字节级透传，上游 Content-Length 原样保留。
+    assert_eq!(parts.status, StatusCode::OK);
+    assert_eq!(
+        parts
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok()),
+        Some(upstream_len.as_str())
+    );
+    assert_eq!(response_body.as_ref(), body.as_bytes());
+}
+
+#[tokio::test]
 async fn xai_video_content_preserves_binary_body_and_content_type() {
     let binary = Bytes::from_static(&[0x00, 0x9f, 0xff, 0x01, 0x80]);
     let upstream_res = axum::http::Response::builder()

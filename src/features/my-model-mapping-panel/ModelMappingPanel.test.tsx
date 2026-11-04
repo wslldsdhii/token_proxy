@@ -1,8 +1,9 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "@/lib/i18n";
+import { m } from "@/paraglide/messages.js";
 
 import { ModelMappingPanel } from "./ModelMappingPanel";
 import type { MappingPanelData } from "./types";
@@ -156,5 +157,47 @@ describe("my-model-mapping-panel", () => {
     await screen.findByText("glm5");
     expect(screen.queryByText("glm-5.3")).toBeNull(); // target 列被隐藏
     expect(screen.queryByText("kimi-k2")).toBeNull(); // kimi 的 target 同样不渲染
+  });
+
+  it("点击标题行任意位置切换展开/收起", async () => {
+    renderPanel();
+    await userEvent.click(screen.getByText(m.my_model_mapping_panel_title()));
+    expect(await screen.findByTestId("mapping-panel-body")).toBeTruthy();
+
+    await userEvent.click(screen.getByText(m.my_model_mapping_panel_desc()));
+    await waitFor(() => expect(screen.queryByTestId("mapping-panel-body")).toBeNull());
+  });
+
+  it("标题行支持键盘 Enter 切换", async () => {
+    renderPanel();
+    const toggle = screen.getByTestId("mapping-panel-toggle");
+    toggle.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByTestId("mapping-panel-body")).toBeTruthy();
+  });
+
+  it("点击表头单元格任意区域切换排序", async () => {
+    renderPanel();
+    await expand();
+
+    const header = screen.getByTestId("mapping-sort-alias");
+    await userEvent.click(header);
+    expect(header.textContent).toContain("↑");
+    await userEvent.click(header);
+    expect(header.textContent).toContain("↓");
+  });
+
+  it("拖拽列宽手柄不触发排序", async () => {
+    renderPanel();
+    await expand();
+
+    const header = screen.getByTestId("mapping-sort-alias");
+    const handle = screen.getByTestId("mapping-resize-alias");
+    fireEvent.mouseDown(handle, { clientX: 100 });
+    fireEvent.click(handle);
+    fireEvent.mouseUp(document);
+
+    expect(header.textContent).not.toContain("↑");
+    expect(header.textContent).not.toContain("↓");
   });
 });

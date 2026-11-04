@@ -93,6 +93,9 @@ pub(super) async fn prepare_upstream_request_with_body(
         extra_headers.as_ref(),
         upstream.header_overrides.as_deref(),
     );
+    // ══════════ HEADER-INJECTION PATCH 7 (apply) START ══════════
+    super::super::header_injection::apply(upstream, body, &mut request_headers);
+    // ══════════ HEADER-INJECTION PATCH 7 (apply) END ══════════
     if provider == "xai" {
         enforce_xai_request_headers(
             &upstream_path_with_query,

@@ -72,6 +72,9 @@ type AppViewProps = {
     index: number,
     patch: Partial<ConfigForm["upstreams"][number]>
   ) => void;
+  // ══════════ HEADER-INJECTION PATCH G7 START ══════════
+  onHeaderInjectionChange: (next: ConfigForm["headerInjection"]) => void;
+  // ══════════ HEADER-INJECTION PATCH G7 END ══════════
   onSave: () => void;
   onReload: () => void;
   /** 账户登录/导入成功后刷新配置（account_upstreams reconcile）。 */
@@ -261,6 +264,8 @@ function ConfigSectionBody({
             onRemove={props.onRemoveUpstream}
             onChange={props.onChangeUpstream}
             onConfigReload={props.onReload}
+            headerInjection={props.form.headerInjection}
+            onHeaderInjectionChange={props.onHeaderInjectionChange}
           />
         </div>
       );

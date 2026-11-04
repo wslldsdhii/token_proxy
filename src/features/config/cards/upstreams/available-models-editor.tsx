@@ -227,7 +227,9 @@ export function AvailableModelsEditor({
 
           {feedback ? <p className="text-xs text-muted-foreground">{feedback}</p> : null}
 
-          <ScrollArea className="h-40 rounded-md border">
+          {/* ══════════ HEADER-INJECTION PATCH G9 (list height) START ══════════ */}
+          {/* 固定高度：全选行（36px）+ 10 条模型（10×40px）+ 余量 = 448px。 */}
+          <ScrollArea className="h-[28rem] rounded-md border" data-testid="available-models-list">
             <div className="divide-y">
               {visibleOptions.length ? (
                 <>
@@ -261,6 +263,7 @@ export function AvailableModelsEditor({
               )}
             </div>
           </ScrollArea>
+          {/* ══════════ HEADER-INJECTION PATCH G9 (list height) END ══════════ */}
 
           <div className="flex items-center gap-2">
             <Input

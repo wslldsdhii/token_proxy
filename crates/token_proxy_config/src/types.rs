@@ -414,6 +414,15 @@ pub struct ProxyConfigFile {
     )]
     pub my_model_mapping_panel: Option<crate::my_model_mapping_panel::MyModelMappingPanelSection>,
     // ══════════ MY-MODEL-MAPPING-PANEL PATCH 2 (field) END ══════════
+    // ══════════ HEADER-INJECTION PATCH 3 (field) START ══════════
+    /// 本地增强：渠道级「会话标记 → 请求头注入」配置段（header_injection 模块）。
+    #[serde(
+        default,
+        deserialize_with = "crate::header_injection::de_lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub header_injection: Option<crate::header_injection::HeaderInjectionSection>,
+    // ══════════ HEADER-INJECTION PATCH 3 (field) END ══════════
 }
 
 impl Default for ProxyConfigFile {
@@ -452,6 +461,9 @@ impl Default for ProxyConfigFile {
             // ══════════ MY-PROXY-ENDPOINT PATCH 2 (default) START ══════════
             my_proxy_endpoint: None,
             // ══════════ MY-PROXY-ENDPOINT PATCH 2 (default) END ══════════
+            // ══════════ HEADER-INJECTION PATCH 3 (default) START ══════════
+            header_injection: None,
+            // ══════════ HEADER-INJECTION PATCH 3 (default) END ══════════
         }
     }
 }
@@ -581,6 +593,10 @@ pub struct UpstreamRuntime {
     /// 出站地址组合（加载期已规范化；缺省全 None = 恒等回退）。
     pub url_compose: my_url_compose::UrlComposeConfig,
     // ══════════ MY-URL-COMPOSE PATCH C2 END ══════════
+    // ══════════ HEADER-INJECTION PATCH 3 (runtime field) START ══════════
+    /// 本渠道的会话标记头注入配置（归一化后；None = 关闭）。
+    pub header_injection: Option<crate::header_injection::HeaderInjectionRuntime>,
+    // ══════════ HEADER-INJECTION PATCH 3 (runtime field) END ══════════
 }
 
 #[derive(Clone)]

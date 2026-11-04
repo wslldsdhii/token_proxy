@@ -23,6 +23,9 @@ pub(super) fn normalize_upstreams(
     upstreams: &[UpstreamConfig],
     app_proxy_url: Option<&str>,
     hot_model_mappings: &HashMap<String, String>,
+    // ══════════ HEADER-INJECTION PATCH 4 (param) START ══════════
+    header_injection: Option<&crate::header_injection::HeaderInjectionSection>,
+    // ══════════ HEADER-INJECTION PATCH 4 (param) END ══════════
 ) -> Result<Vec<NormalizedUpstream>, String> {
     validate_upstream_ids(upstreams)?;
     // Account-as-Upstream：同一账户引用只能被一条 Upstream 绑定。
@@ -33,6 +36,9 @@ pub(super) fn normalize_upstreams(
             upstream,
             app_proxy_url,
             hot_model_mappings,
+            // ══════════ HEADER-INJECTION PATCH 4 (arg) START ══════════
+            header_injection,
+            // ══════════ HEADER-INJECTION PATCH 4 (arg) END ══════════
         )?);
     }
     Ok(normalized)
@@ -118,6 +124,9 @@ fn normalize_single_upstream(
     upstream: &UpstreamConfig,
     app_proxy_url: Option<&str>,
     hot_model_mappings: &HashMap<String, String>,
+    // ══════════ HEADER-INJECTION PATCH 5 (param) START ══════════
+    header_injection_section: Option<&crate::header_injection::HeaderInjectionSection>,
+    // ══════════ HEADER-INJECTION PATCH 5 (param) END ══════════
 ) -> Result<Vec<NormalizedUpstream>, String> {
     if !upstream.enabled {
         return Ok(Vec::new());
@@ -155,6 +164,10 @@ fn normalize_single_upstream(
         merge_hot_model_mappings(hot_model_mappings, &upstream.model_mappings);
     let model_mappings = compile_model_mappings(&upstream.id, &merged_model_mappings)?;
     let header_overrides = normalize_header_overrides(upstream.overrides.as_ref())?;
+    // ══════════ HEADER-INJECTION PATCH 5 (resolve) START ══════════
+    let header_injection =
+        crate::header_injection::resolve_channel(header_injection_section, &upstream.id);
+    // ══════════ HEADER-INJECTION PATCH 5 (resolve) END ══════════
     // ══════════ MY-URL-COMPOSE PATCH C2 START ══════════
     let url_compose = upstream
         .url_compose
@@ -216,6 +229,9 @@ fn normalize_single_upstream(
                 // ══════════ MY-URL-COMPOSE PATCH C2 START ══════════
                 url_compose: url_compose.clone(),
                 // ══════════ MY-URL-COMPOSE PATCH C2 END ══════════
+                // ══════════ HEADER-INJECTION PATCH 5 (attach) START ══════════
+                header_injection: header_injection.clone(),
+                // ══════════ HEADER-INJECTION PATCH 5 (attach) END ══════════
             };
             output.push(NormalizedUpstream {
                 provider: runtime_provider.clone(),

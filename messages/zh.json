@@ -703,10 +703,9 @@
   "my_proxy_endpoint_ip_kind_loopback": "回环",
   "my_proxy_endpoint_ip_kind_lan": "局域网",
   "my_proxy_endpoint_ip_kind_virtual": "虚拟网卡",
-  "my_proxy_endpoint_format_openai": "OpenAI 兼容",
-  "my_proxy_endpoint_format_anthropic": "Anthropic（Claude Code）",
-  "my_proxy_endpoint_format_gemini": "Gemini 原生",
-  "my_proxy_endpoint_no_suffix": "无后缀",
+  "my_proxy_endpoint_format_openai": "OpenAI",
+  "my_proxy_endpoint_format_anthropic": "Anthropic",
+  "my_proxy_endpoint_format_gemini": "Gemini",
   "my_proxy_endpoint_copy_url": "复制 URL",
   "my_proxy_endpoint_copy_ip": "复制 IP",
   "my_proxy_endpoint_copy_key": "复制 Key",
@@ -742,5 +741,12 @@
   "my_model_mapping_panel_load_failed": "映射配置加载失败",
   "my_model_mapping_panel_empty": "没有渠道配置模型映射",
   "my_model_mapping_panel_empty_filtered": "无匹配结果",
-  "my_model_mapping_panel_only_enabled": "仅启用"
+  "my_model_mapping_panel_only_enabled": "仅启用",
+  "upstreams_section_header_injection": "请求头注入",
+  "upstreams_header_injection_enable": "启用请求头注入",
+  "upstreams_header_injection_target": "目标 Header",
+  "upstreams_header_injection_tip": "从最新用户消息的会话标记中提取 ID 并写入目标 Header；未检测到标记时原样透传。",
+  "upstreams_header_injection_option_session": "X-Session-ID（通用兼容）",
+  "upstreams_header_injection_option_opencode": "X-Opencode-Session（OpenCode Go）",
+  "upstreams_header_injection_hint": "默认 X-Session-ID；接入 OpenCode Go 时选择 X-Opencode-Session。"
 }

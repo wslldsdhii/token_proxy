@@ -23,6 +23,7 @@ fn hot_model_test_upstream(model_mappings: Option<ModelMappingRules>) -> Upstrea
         header_overrides: None,
         allowed_inbound_formats: Default::default(),
         url_compose: Default::default(),
+        header_injection: None,
     }
 }
 
@@ -131,6 +132,7 @@ fn test_upstream_url() {
             header_overrides: None,
             allowed_inbound_formats: Default::default(),
             url_compose,
+            header_injection: None,
         }
     }
 

@@ -9,6 +9,9 @@ pub(crate) use token_proxy_protocol::{codex_tool_types, compat_content, compat_r
 mod cooldown_scope;
 mod gemini;
 mod gemini_compat;
+// ══════════ HEADER-INJECTION PATCH 6 (module) START ══════════
+mod header_injection;
+// ══════════ HEADER-INJECTION PATCH 6 (module) END ══════════
 mod http;
 mod http_client;
 mod inbound;

@@ -21,6 +21,12 @@ import {
   isAccountProviderKind,
 } from "@/features/config/cards/upstreams/upstream-editor-helpers";
 import { createNativeInboundFormatSet, removeInboundFormatsInSet } from "@/features/config/inbound-formats";
+// ══════════ HEADER-INJECTION PATCH G3 (imports) START ══════════
+import {
+  normalizeHeaderInjectionSection,
+  toHeaderInjectionPayload,
+} from "@/features/config/header-injection";
+// ══════════ HEADER-INJECTION PATCH G3 (imports) END ══════════
 import { m } from "@/paraglide/messages.js";
 
 const DEFAULT_TRAY_TOKEN_RATE: TrayTokenRateConfig = {
@@ -189,6 +195,9 @@ const KNOWN_CONFIG_KEYS: ReadonlySet<string> = new Set([
   "upstream_strategy",
   "hot_model_mappings",
   "upstreams",
+  // ══════════ HEADER-INJECTION PATCH G3 (known key) START ══════════
+  "header_injection",
+  // ══════════ HEADER-INJECTION PATCH G3 (known key) END ══════════
 ]);
 
 const REMOVED_CONFIG_KEYS: ReadonlySet<string> = new Set([
@@ -221,6 +230,9 @@ export const EMPTY_FORM: ConfigForm = {
   },
   hotModelMappings: [],
   upstreams: [],
+  // ══════════ HEADER-INJECTION PATCH G3 (empty form) START ══════════
+  headerInjection: { version: 1, channels: {} },
+  // ══════════ HEADER-INJECTION PATCH G3 (empty form) END ══════════
 };
 
 export function createEmptyUpstream(): UpstreamForm {
@@ -376,6 +388,9 @@ export function toForm(config: ProxyConfigFile): ConfigForm {
         // ══════════ MY-URL-COMPOSE PATCH G2 END ══════════
       };
     }),
+    // ══════════ HEADER-INJECTION PATCH G3 (to form) START ══════════
+    headerInjection: normalizeHeaderInjectionSection(config.header_injection),
+    // ══════════ HEADER-INJECTION PATCH G3 (to form) END ══════════
   };
 }
 
@@ -438,6 +453,11 @@ export function toPayload(form: ConfigForm): ProxyConfigFile {
         // ══════════ MY-URL-COMPOSE PATCH G2 END ══════════
       };
     }),
+    // ══════════ HEADER-INJECTION PATCH G3 (to payload) START ══════════
+    ...(toHeaderInjectionPayload(form.headerInjection)
+      ? { header_injection: toHeaderInjectionPayload(form.headerInjection) }
+      : {}),
+    // ══════════ HEADER-INJECTION PATCH G3 (to payload) END ══════════
   };
 }
 

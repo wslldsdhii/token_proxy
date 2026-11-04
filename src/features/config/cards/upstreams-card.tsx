@@ -29,7 +29,18 @@ import type {
   UpstreamEditorState,
 } from "@/features/config/cards/upstreams/types";
 import { createEmptyUpstream } from "@/features/config/form";
-import type { ConfigForm, UpstreamForm } from "@/features/config/types";
+// ══════════ HEADER-INJECTION PATCH G4 (imports) START ══════════
+import {
+  applyEditorSave,
+  readChannelDraft,
+} from "@/features/config/header-injection";
+import type {
+  ConfigForm,
+  HeaderInjectionChannelDraft,
+  HeaderInjectionSectionConfig,
+  UpstreamForm,
+} from "@/features/config/types";
+// ══════════ HEADER-INJECTION PATCH G4 (imports) END ══════════
 import { m } from "@/paraglide/messages.js";
 
 type UpstreamsCardProps = {
@@ -45,6 +56,11 @@ type UpstreamsCardProps = {
   onChange: (index: number, patch: Partial<UpstreamForm>) => void;
   /** 登录/导入账户后 reload config，使后端 reconcile 写入 account Upstream。 */
   onConfigReload: () => void;
+  // ══════════ HEADER-INJECTION PATCH G4 (props) START ══════════
+  /** 全局 header_injection 段；渠道编辑器按渠道 id 读写。 */
+  headerInjection: HeaderInjectionSectionConfig;
+  onHeaderInjectionChange: (next: HeaderInjectionSectionConfig) => void;
+  // ══════════ HEADER-INJECTION PATCH G4 (props) END ══════════
 };
 
 export function UpstreamsCard({
@@ -59,6 +75,8 @@ export function UpstreamsCard({
   onRemove,
   onChange,
   onConfigReload,
+  headerInjection,
+  onHeaderInjectionChange,
 }: UpstreamsCardProps) {
   const mergedProviderOptions = useMemo(
     () => mergeProviderOptions(providerOptions),
@@ -179,7 +197,13 @@ export function UpstreamsCard({
     const nextProviders = normalizeProviders(draft.providers);
     const hasDuplicateId = upstreams.some((upstream) => upstream.id.trim() === draft.id.trim());
     const nextId = hasDuplicateId ? createCopiedUpstreamId(draft.id, upstreams) : draft.id;
-    setEditor({ open: true, mode: "create", draft: { ...draft, id: nextId, providers: nextProviders } });
+    setEditor({
+      open: true,
+      mode: "create",
+      draft: { ...draft, id: nextId, providers: nextProviders },
+      // 新渠道默认关闭：无记录时读出「关闭 + 默认 Header」。
+      headerInjection: readChannelDraft(headerInjection, nextId),
+    });
   };
 
   const openEditDialog = (index: number) => {
@@ -187,7 +211,13 @@ export function UpstreamsCard({
     if (!upstream) {
       return;
     }
-    setEditor({ open: true, mode: "edit", index, draft: cloneUpstreamDraft(upstream) });
+    setEditor({
+      open: true,
+      mode: "edit",
+      index,
+      draft: cloneUpstreamDraft(upstream),
+      headerInjection: readChannelDraft(headerInjection, upstream.id),
+    });
   };
 
   const openCopyDialog = (index: number) => {
@@ -201,13 +231,35 @@ export function UpstreamsCard({
       ...cloneUpstreamDraft(upstream),
       id: nextId,
     };
-    setEditor({ open: true, mode: "create", draft });
+    setEditor({
+      open: true,
+      mode: "create",
+      draft,
+      // 复制出的渠道也是「创建」：不继承源渠道的头注入记录。
+      headerInjection: readChannelDraft(headerInjection, nextId),
+    });
   };
+
+  const updateHeaderInjectionDraft = useCallback(
+    (next: HeaderInjectionChannelDraft) => {
+      setEditor((prev) => (prev.open ? { ...prev, headerInjection: next } : prev));
+    },
+    [],
+  );
 
   const saveDraft = () => {
     if (!editor.open) {
       return;
     }
+
+    const finalId = editor.draft.id.trim();
+    onHeaderInjectionChange(
+      applyEditorSave(headerInjection, {
+        originalId: editor.mode === "edit" ? upstreams[editor.index]?.id : undefined,
+        channelId: finalId,
+        draft: editor.headerInjection,
+      }),
+    );
 
     if (editor.mode === "create") {
       onAdd(editor.draft);
@@ -288,6 +340,8 @@ export function UpstreamsCard({
         onOpenChange={(open) => !open && setEditor({ open: false })}
         onChangeDraft={updateDraft}
         onSave={saveDraft}
+        headerInjection={editor.open ? editor.headerInjection : undefined}
+        onHeaderInjectionChange={updateHeaderInjectionDraft}
       />
       <DeleteUpstreamDialog
         dialog={deleteDialog}

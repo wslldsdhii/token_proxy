@@ -63,6 +63,7 @@ const BASE_APP_VIEW_PROPS = {
   onAddUpstream: () => undefined,
   onRemoveUpstream: () => undefined,
   onChangeUpstream: () => undefined,
+  onHeaderInjectionChange: () => undefined,
   onReload: () => undefined,
   onSave: () => undefined,
   onProxyServiceRefresh: () => undefined,

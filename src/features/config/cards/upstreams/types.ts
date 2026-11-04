@@ -1,4 +1,6 @@
-import type { UpstreamForm } from "@/features/config/types";
+// ══════════ HEADER-INJECTION PATCH G10 (types) START ══════════
+import type { HeaderInjectionChannelDraft, UpstreamForm } from "@/features/config/types";
+// ══════════ HEADER-INJECTION PATCH G10 (types) END ══════════
 
 export type UpstreamColumnId =
   | "id"
@@ -19,9 +21,22 @@ export type UpstreamColumnDefinition = {
 
 export type ColumnVisibility = Record<UpstreamColumnId, boolean>;
 
+// ══════════ HEADER-INJECTION PATCH G10 (editor state) START ══════════
 export type UpstreamEditorState =
   | { open: false }
-  | { open: true; mode: "create"; draft: UpstreamForm }
-  | { open: true; mode: "edit"; index: number; draft: UpstreamForm };
+  | {
+      open: true;
+      mode: "create";
+      draft: UpstreamForm;
+      headerInjection: HeaderInjectionChannelDraft;
+    }
+  | {
+      open: true;
+      mode: "edit";
+      index: number;
+      draft: UpstreamForm;
+      headerInjection: HeaderInjectionChannelDraft;
+    };
+// ══════════ HEADER-INJECTION PATCH G10 (editor state) END ══════════
 
 export type DeleteDialogState = { open: false } | { open: true; index: number };

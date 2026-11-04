@@ -94,6 +94,10 @@ function buildAppViewProps({
     onAddUpstream: listActions.addUpstream,
     onRemoveUpstream: listActions.removeUpstream,
     onChangeUpstream: listActions.updateUpstream,
+    // ══════════ HEADER-INJECTION PATCH G8 START ══════════
+    onHeaderInjectionChange: (headerInjection: ConfigForm["headerInjection"]) =>
+      state.updateForm({ headerInjection }),
+    // ══════════ HEADER-INJECTION PATCH G8 END ══════════
     onSave: configActions.saveConfig,
     onReload: configActions.loadConfig,
     onProxyServiceRefresh: proxyActions.refreshProxyStatus,

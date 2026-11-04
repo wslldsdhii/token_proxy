@@ -249,9 +249,6 @@ export function MyProxyEndpointBar() {
                 {MY_PROXY_ENDPOINT_FORMATS.map((format) => (
                   <SelectItem key={format} value={format} className="text-xs">
                     {FORMAT_LABELS[format]()}
-                    <span className="font-mono text-muted-foreground">
-                      {formatSuffix(format) || m.my_proxy_endpoint_no_suffix()}
-                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -92,6 +92,8 @@ function renderUpstreamsCard(
       onRemove={props.onRemove ?? (() => undefined)}
       onChange={props.onChange ?? (() => undefined)}
       onConfigReload={props.onConfigReload ?? (() => undefined)}
+      headerInjection={props.headerInjection ?? { version: 1, channels: {} }}
+      onHeaderInjectionChange={props.onHeaderInjectionChange ?? (() => undefined)}
     />,
   );
 }

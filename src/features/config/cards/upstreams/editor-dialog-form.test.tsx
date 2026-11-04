@@ -266,4 +266,43 @@ describe("upstreams/editor-dialog-form", () => {
     expect(screen.getByLabelText(m.field_id())).toBeEnabled();
     expect(screen.getByRole("button", { name: /antigravity/i })).toBeEnabled();
   });
+
+  it("renders header injection controls and reports draft changes", async () => {
+    const user = userEvent.setup();
+    const onHeaderInjectionChange = vi.fn();
+    const draft = createEmptyUpstream();
+
+    render(
+      <UpstreamEditorFields
+        draft={draft}
+        providerOptions={["openai"]}
+        appProxyUrl=""
+        showApiKeys={false}
+        onToggleApiKeys={vi.fn()}
+        onChangeDraft={vi.fn()}
+        headerInjection={{ enabled: false, targetHeader: "X-Session-ID" }}
+        onHeaderInjectionChange={onHeaderInjectionChange}
+      />
+    );
+
+    expect(screen.getByText(m.upstreams_section_header_injection())).toBeInTheDocument();
+    expect(screen.getByText(m.upstreams_header_injection_hint())).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("upstream-header-injection-enable"));
+    expect(onHeaderInjectionChange).toHaveBeenCalledWith({
+      enabled: true,
+      targetHeader: "X-Session-ID",
+    });
+
+    await user.click(screen.getByTestId("upstream-header-injection-target"));
+    await user.click(
+      await screen.findByRole("option", {
+        name: m.upstreams_header_injection_option_opencode(),
+      }),
+    );
+    expect(onHeaderInjectionChange).toHaveBeenCalledWith({
+      enabled: false,
+      targetHeader: "X-Opencode-Session",
+    });
+  });
 });

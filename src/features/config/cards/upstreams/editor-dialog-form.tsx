@@ -32,11 +32,15 @@ import {
   isAccountProviderKind,
 } from "@/features/config/cards/upstreams/upstream-editor-helpers";
 import { createModelMapping } from "@/features/config/form";
+// ══════════ HEADER-INJECTION PATCH G6 (imports) START ══════════
+import { DEFAULT_TARGET_HEADER, TARGET_HEADER_OPTIONS } from "@/features/config/header-injection";
 import type {
   HeaderOverrideForm,
+  HeaderInjectionChannelDraft,
   KiroPreferredEndpoint,
   UpstreamForm,
 } from "@/features/config/types";
+// ══════════ HEADER-INJECTION PATCH G6 (imports) END ══════════
 import { m } from "@/paraglide/messages.js";
 
 const KIRO_ENDPOINT_INHERIT = "inherit";
@@ -63,6 +67,11 @@ export type UpstreamEditorFieldsProps = {
   onChangeDraft: (patch: Partial<UpstreamForm>) => void;
   /** 新建渠道时为 true：url-compose 后缀按家族预填默认值。 */
   prefillSuffixDefaults?: boolean;
+  // ══════════ HEADER-INJECTION PATCH G6 (props) START ══════════
+  /** 编辑器打开时由 UpstreamsCard 提供；独立渲染（测试）时缺省为关闭。 */
+  headerInjection?: HeaderInjectionChannelDraft;
+  onHeaderInjectionChange?: (next: HeaderInjectionChannelDraft) => void;
+  // ══════════ HEADER-INJECTION PATCH G6 (props) END ══════════
 };
 
 type EditorSectionProps = {
@@ -453,10 +462,83 @@ function UpstreamHeaderOverrideFields({
   );
 }
 
+// ══════════ HEADER-INJECTION PATCH G6 (fields) START ══════════
+function UpstreamHeaderInjectionFields({
+  draft,
+  onChange,
+}: {
+  draft: HeaderInjectionChannelDraft;
+  onChange: (next: HeaderInjectionChannelDraft) => void;
+}) {
+  return (
+    <div
+      data-slot="upstream-header-injection-fields"
+      className="col-span-2 space-y-3 rounded-md border border-border/60 bg-muted/20 p-3"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <Label className="inline-flex items-center gap-1">
+          {m.upstreams_section_header_injection()}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <HelpCircle className="size-3.5 cursor-help text-muted-foreground" />
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-xs">
+              {m.upstreams_header_injection_tip()}
+            </TooltipContent>
+          </Tooltip>
+        </Label>
+        <Switch
+          checked={draft.enabled}
+          onCheckedChange={(enabled) => onChange({ ...draft, enabled })}
+          aria-label={m.upstreams_header_injection_enable()}
+          data-testid="upstream-header-injection-enable"
+        />
+      </div>
+
+      <div className="grid grid-cols-[minmax(7rem,auto)_1fr] items-center gap-x-4 gap-y-2">
+        <Label htmlFor="upstream-header-injection-target">
+          {m.upstreams_header_injection_target()}
+        </Label>
+        <Select
+          value={draft.targetHeader}
+          onValueChange={(targetHeader) => onChange({ ...draft, targetHeader })}
+        >
+          <SelectTrigger
+            id="upstream-header-injection-target"
+            className="w-full"
+            data-testid="upstream-header-injection-target"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TARGET_HEADER_OPTIONS.map((value) => (
+              <SelectItem key={value} value={value}>
+                {value === "X-Opencode-Session"
+                  ? m.upstreams_header_injection_option_opencode()
+                  : m.upstreams_header_injection_option_session()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        {m.upstreams_header_injection_hint()}
+      </p>
+    </div>
+  );
+}
+// ══════════ HEADER-INJECTION PATCH G6 (fields) END ══════════
+
 function UpstreamAdvancedFields({
   draft,
   onChangeDraft,
-}: UpstreamOpenAIResponsesFieldsProps) {
+  headerInjection,
+  onHeaderInjectionChange,
+}: UpstreamOpenAIResponsesFieldsProps & {
+  headerInjection: HeaderInjectionChannelDraft;
+  onHeaderInjectionChange: (next: HeaderInjectionChannelDraft) => void;
+}) {
   return (
     <details className="group">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-md py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -480,6 +562,10 @@ function UpstreamAdvancedFields({
         />
         <UpstreamModelMappingFields draft={draft} onChangeDraft={onChangeDraft} />
         <UpstreamHeaderOverrideFields draft={draft} onChangeDraft={onChangeDraft} />
+        <UpstreamHeaderInjectionFields
+          draft={headerInjection}
+          onChange={onHeaderInjectionChange}
+        />
         <UpstreamOpenAIResponsesFields draft={draft} onChangeDraft={onChangeDraft} />
       </div>
     </details>
@@ -494,6 +580,8 @@ export function UpstreamEditorFields({
   onToggleApiKeys,
   onChangeDraft,
   prefillSuffixDefaults = false,
+  headerInjection = { enabled: false, targetHeader: DEFAULT_TARGET_HEADER },
+  onHeaderInjectionChange = () => undefined,
 }: UpstreamEditorFieldsProps) {
   return (
     <div data-slot="upstream-editor-fields" className="space-y-5">
@@ -523,7 +611,12 @@ export function UpstreamEditorFields({
         />
       </EditorSection>
 
-      <UpstreamAdvancedFields draft={draft} onChangeDraft={onChangeDraft} />
+      <UpstreamAdvancedFields
+        draft={draft}
+        onChangeDraft={onChangeDraft}
+        headerInjection={headerInjection}
+        onHeaderInjectionChange={onHeaderInjectionChange}
+      />
     </div>
   );
 }

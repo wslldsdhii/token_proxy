@@ -70,3 +70,20 @@ describe("账户渠道模型刷新", () => {
     expect(onChangeDraft).not.toHaveBeenCalled();
   });
 });
+
+describe("模型列表可视高度", () => {
+  it("固定高度可完整显示 10 个模型条目且全选行粘性", () => {
+    const draft = {
+      ...createEmptyUpstream(),
+      availableModelsMode: "selected" as const,
+      availableModels: ["saved-model"],
+    };
+    render(<AvailableModelsEditor draft={draft} onChangeDraft={vi.fn()} />);
+
+    const list = screen.getByTestId("available-models-list");
+    expect(list).toHaveClass("h-[28rem]");
+
+    const bulkRow = list.querySelector("label");
+    expect(bulkRow).toHaveClass("sticky");
+  });
+});

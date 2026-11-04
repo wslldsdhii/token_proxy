@@ -175,13 +175,16 @@ export function ModelMappingPanel() {
 
   const sortableHeader = (column: SortableColumnId, label: string) => (
     <th
-      className="h-9 select-none px-3 text-left align-middle text-xs font-medium text-muted-foreground"
+      className="h-9 select-none p-0 text-left align-middle text-xs font-medium text-muted-foreground"
       style={{ width: widthOf(column) }}
     >
-      <div className="flex items-center gap-1">
+      <div className="relative flex h-9 items-center">
         <button
           type="button"
-          className={cn("hover:text-foreground", sortColumn === column && "text-foreground")}
+          className={cn(
+            "flex h-full w-full items-center gap-1 px-3 text-left hover:text-foreground",
+            sortColumn === column && "text-foreground"
+          )}
           onClick={() => toggleSort(column)}
           data-testid={`mapping-sort-${column}`}
         >
@@ -190,8 +193,10 @@ export function ModelMappingPanel() {
         </button>
         <span
           aria-hidden="true"
-          className="ml-auto h-4 w-1 cursor-col-resize rounded bg-border/70 hover:bg-primary/60"
+          className="absolute right-0 top-1/2 h-4 w-1 -translate-y-1/2 cursor-col-resize rounded bg-border/70 hover:bg-primary/60"
           onMouseDown={startColumnResize(column)}
+          onClick={(event) => event.stopPropagation()}
+          data-testid={`mapping-resize-${column}`}
         />
       </div>
     </th>
@@ -218,7 +223,13 @@ export function ModelMappingPanel() {
       <div className="px-4 lg:px-6" data-testid="my-model-mapping-panel">
         <Card className="gap-0 border-border/60 bg-background/70 py-0">
           <CardContent className="flex flex-col gap-0 py-2.5">
-            <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex w-full cursor-pointer select-none items-center gap-2 text-left"
+              onClick={() => setExpanded((prev) => !prev)}
+              aria-expanded={expanded}
+              data-testid="mapping-panel-toggle"
+            >
               <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                 <ListTree className="size-3.5" aria-hidden="true" />
               </span>
@@ -228,13 +239,7 @@ export function ModelMappingPanel() {
               <span className="hidden truncate text-xs text-muted-foreground md:inline">
                 {m.my_model_mapping_panel_desc()}
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto h-7 gap-1 px-2 text-xs"
-                onClick={() => setExpanded((prev) => !prev)}
-                data-testid="mapping-panel-toggle"
-              >
+              <span className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 px-2 text-xs text-muted-foreground">
                 {expanded ? (
                   <ChevronsDownUp className="size-3.5" aria-hidden="true" />
                 ) : (
@@ -243,8 +248,8 @@ export function ModelMappingPanel() {
                 {expanded
                   ? m.my_model_mapping_panel_collapse()
                   : m.my_model_mapping_panel_expand()}
-              </Button>
-            </div>
+              </span>
+            </button>
 
             {expanded ? (
               <div
@@ -410,17 +415,18 @@ export function ModelMappingPanel() {
                                 sortableHeader("target", m.my_model_mapping_panel_col_target())}
                               {!isHidden("providers") && (
                                 <th
-                                  className="h-9 px-3 text-left align-middle text-xs font-medium text-muted-foreground"
+                                  className="h-9 select-none p-0 text-left align-middle text-xs font-medium text-muted-foreground"
                                   style={{ width: widthOf("providers") }}
                                 >
-                                  <div className="flex items-center">
+                                  <div className="relative flex h-9 items-center">
                                     <button
                                       type="button"
                                       className={cn(
-                                        "select-none hover:text-foreground",
+                                        "flex h-full w-full items-center gap-1 px-3 text-left hover:text-foreground",
                                         sortColumn === "providers" && "text-foreground"
                                       )}
                                       onClick={() => toggleSort("providers")}
+                                      data-testid="mapping-sort-providers"
                                     >
                                       {m.my_model_mapping_panel_col_providers()}
                                       {sortColumn === "providers"
@@ -431,8 +437,10 @@ export function ModelMappingPanel() {
                                     </button>
                                     <span
                                       aria-hidden="true"
-                                      className="ml-auto h-4 w-1 cursor-col-resize rounded bg-border/70 hover:bg-primary/60"
+                                      className="absolute right-0 top-1/2 h-4 w-1 -translate-y-1/2 cursor-col-resize rounded bg-border/70 hover:bg-primary/60"
                                       onMouseDown={startColumnResize("providers")}
+                                      onClick={(event) => event.stopPropagation()}
+                                      data-testid="mapping-resize-providers"
                                     />
                                   </div>
                                 </th>

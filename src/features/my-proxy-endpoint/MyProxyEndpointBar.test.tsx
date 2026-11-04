@@ -4,6 +4,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "@/lib/i18n";
+import { m } from "@/paraglide/messages.js";
 
 import { MyProxyEndpointBar } from "./MyProxyEndpointBar";
 import type { MyProxyEndpointSnapshot } from "./types";
@@ -176,4 +177,24 @@ describe("my-proxy-endpoint/MyProxyEndpointBar", () => {
     expect(screen.queryByTestId("my-proxy-endpoint-listen")).toBeDefined();
   });
   // ══════════ MY-STRIP-VERSION PATCH 11 (test) END ══════════
+
+  it("shows plain format names without path suffixes", async () => {
+    renderBar();
+    await screen.findByTestId("my-proxy-endpoint-url");
+
+    await userEvent.click(screen.getByTestId("my-proxy-endpoint-format-trigger"));
+    const options = await screen.findAllByRole("option");
+    const texts = options.map((option) => (option.textContent ?? "").trim());
+
+    expect(texts).toEqual([
+      m.my_proxy_endpoint_format_openai(),
+      m.my_proxy_endpoint_format_anthropic(),
+      m.my_proxy_endpoint_format_gemini(),
+    ]);
+    for (const text of texts) {
+      expect(text).not.toContain("/v1");
+      expect(text).not.toContain("Claude Code");
+      expect(text).not.toContain("无后缀");
+    }
+  });
 });

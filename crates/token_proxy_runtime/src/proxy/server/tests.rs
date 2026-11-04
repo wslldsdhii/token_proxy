@@ -112,6 +112,7 @@ fn config_with_runtime_upstreams(
             header_overrides: None,
             allowed_inbound_formats: Default::default(),
             url_compose: Default::default(),
+            header_injection: None,
         };
         runtime.allow_inbound_formats(inbound_formats.iter().copied());
         let entry = provider_map

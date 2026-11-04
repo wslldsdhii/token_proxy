@@ -720,3 +720,68 @@ it("preserves model capabilities through form editing without header overrides",
   form.upstreams[0].priority = "5";
   expect(toPayload(form).upstreams[0].overrides?.model_capabilities).toEqual(config.upstreams[0].overrides.model_capabilities);
 });
+
+describe("config/form header_injection", () => {
+  it("omits the domain when no channel record exists", () => {
+    const payload = toPayload({ ...EMPTY_FORM, upstreams: [] });
+    expect(payload.header_injection).toBeUndefined();
+  });
+
+  it("round-trips a channel record without dropping unknown fields", () => {
+    const config = {
+      ...toPayload({ ...EMPTY_FORM, upstreams: [] }),
+      header_injection: {
+        version: 1,
+        future_flag: true,
+        channels: {
+          trae: {
+            enabled: true,
+            future_channel_flag: 7,
+            rules: [
+              {
+                id: "session-id",
+                enabled: true,
+                source: "hook_session_marker",
+                target_header: "X-Opencode-Session",
+              },
+            ],
+          },
+        },
+      },
+    };
+    const payload = toPayload(toForm(config));
+    expect(payload.header_injection).toEqual(config.header_injection);
+  });
+
+  it("keeps a disabled record after the switch is turned off", () => {
+    const config = {
+      ...toPayload({ ...EMPTY_FORM, upstreams: [] }),
+      header_injection: {
+        version: 1,
+        channels: {
+          trae: {
+            enabled: true,
+            rules: [
+              {
+                id: "session-id",
+                enabled: true,
+                source: "hook_session_marker",
+                target_header: "X-Session-ID",
+              },
+            ],
+          },
+        },
+      },
+    };
+    const form = toForm(config);
+    form.headerInjection = {
+      ...form.headerInjection,
+      channels: {
+        trae: { ...form.headerInjection.channels?.trae, enabled: false },
+      },
+    };
+    const payload = toPayload(form);
+    expect(payload.header_injection?.channels?.trae.enabled).toBe(false);
+    expect(payload.header_injection?.channels?.trae.rules?.[0].target_header).toBe("X-Session-ID");
+  });
+});

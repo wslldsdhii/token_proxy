@@ -25,6 +25,7 @@ fn gemini_upstream() -> UpstreamRuntime {
         header_overrides: None,
         allowed_inbound_formats: Default::default(),
         url_compose: Default::default(),
+        header_injection: None,
     }
 }
 

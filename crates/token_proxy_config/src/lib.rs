@@ -20,6 +20,9 @@ pub mod rate_recorder;
 // ══════════ MY-MODEL-MAPPING-PANEL PATCH 1 (mod) START ══════════
 pub mod my_model_mapping_panel;
 // ══════════ MY-MODEL-MAPPING-PANEL PATCH 1 (mod) END ══════════
+// ══════════ HEADER-INJECTION PATCH 1 (mod) START ══════════
+pub mod header_injection;
+// ══════════ HEADER-INJECTION PATCH 1 (mod) END ══════════
 mod normalize;
 mod types;
 
@@ -122,6 +125,9 @@ fn build_runtime_config(config: ProxyConfigFile) -> Result<ProxyConfig, String> 
         &config.upstreams,
         app_proxy_url.as_deref(),
         &hot_model_mappings,
+        // ══════════ HEADER-INJECTION PATCH 2 (normalize) START ══════════
+        config.header_injection.as_ref(),
+        // ══════════ HEADER-INJECTION PATCH 2 (normalize) END ══════════
     )?;
     let upstreams = normalize::build_provider_upstreams(normalized_upstreams)?;
     Ok(ProxyConfig {

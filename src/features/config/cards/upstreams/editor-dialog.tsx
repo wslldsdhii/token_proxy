@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { UpstreamEditorFields } from "@/features/config/cards/upstreams/editor-dialog-form";
 import type { UpstreamEditorState } from "@/features/config/cards/upstreams/types";
-import type { UpstreamForm } from "@/features/config/types";
+import type { HeaderInjectionChannelDraft, UpstreamForm } from "@/features/config/types";
 import { m } from "@/paraglide/messages.js";
 
 type UpstreamEditorDialogProps = {
@@ -25,6 +25,11 @@ type UpstreamEditorDialogProps = {
   onOpenChange: (open: boolean) => void;
   onChangeDraft: (patch: Partial<UpstreamForm>) => void;
   onSave: () => void;
+  // ══════════ HEADER-INJECTION PATCH G5 START ══════════
+  /** 编辑器打开时由 UpstreamsCard 提供草稿；关闭时为 undefined。 */
+  headerInjection?: HeaderInjectionChannelDraft;
+  onHeaderInjectionChange: (next: HeaderInjectionChannelDraft) => void;
+  // ══════════ HEADER-INJECTION PATCH G5 END ══════════
 };
 
 export function UpstreamEditorDialog({
@@ -36,6 +41,8 @@ export function UpstreamEditorDialog({
   onOpenChange,
   onChangeDraft,
   onSave,
+  headerInjection,
+  onHeaderInjectionChange,
 }: UpstreamEditorDialogProps) {
   const title = editor.open
     ? editor.mode === "create"
@@ -62,7 +69,7 @@ export function UpstreamEditorDialog({
           ) : null}
         </AlertDialogHeader>
         <AlertDialogBody className="pr-2">
-          {editor.open ? (
+          {editor.open && headerInjection ? (
             <UpstreamEditorFields
               draft={editor.draft}
               providerOptions={providerOptions}
@@ -71,6 +78,8 @@ export function UpstreamEditorDialog({
               onToggleApiKeys={onToggleApiKeys}
               onChangeDraft={onChangeDraft}
               prefillSuffixDefaults={editor.mode === "create"}
+              headerInjection={headerInjection}
+              onHeaderInjectionChange={onHeaderInjectionChange}
             />
           ) : null}
         </AlertDialogBody>

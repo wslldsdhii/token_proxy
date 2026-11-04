@@ -165,6 +165,10 @@ export type ProxyConfigFileBase = {
   upstream_strategy: UpstreamStrategy;
   hot_model_mappings?: Record<string, string>;
   upstreams: UpstreamConfig[];
+  // ══════════ HEADER-INJECTION PATCH G1 (payload) START ══════════
+  /** 渠道级「会话标记 → 请求头注入」配置段；缺省 = 全部关闭。 */
+  header_injection?: HeaderInjectionSectionConfig;
+  // ══════════ HEADER-INJECTION PATCH G1 (payload) END ══════════
 };
 
 export type ProxyConfigFile = ProxyConfigFileBase & Record<string, unknown>;
@@ -254,6 +258,35 @@ export type HeaderOverrideForm = {
   isNull: boolean;
 };
 
+/** ═══ HEADER-INJECTION PATCH G1 START：配置段形态（与后端 header_injection 对齐） ═══ */
+export type HeaderInjectionRuleConfig = {
+  id?: string;
+  enabled?: boolean;
+  source?: string;
+  target_header?: string;
+  /** 保留未来版本字段，GUI 保存时不丢弃。 */
+  [key: string]: unknown;
+};
+
+export type HeaderInjectionChannelConfig = {
+  enabled?: boolean;
+  rules?: HeaderInjectionRuleConfig[];
+  [key: string]: unknown;
+};
+
+export type HeaderInjectionSectionConfig = {
+  version?: number;
+  channels?: Record<string, HeaderInjectionChannelConfig>;
+  [key: string]: unknown;
+};
+
+/** 渠道编辑器内的草稿态（只暴露 UI 编辑的两项）。 */
+export type HeaderInjectionChannelDraft = {
+  enabled: boolean;
+  targetHeader: string;
+};
+/** ═══ HEADER-INJECTION PATCH G1 END ═══ */
+
 export type ModelMappingForm = {
   id: string;
   pattern: string;
@@ -285,4 +318,8 @@ export type ConfigForm = {
   };
   hotModelMappings: ModelMappingForm[];
   upstreams: UpstreamForm[];
+  // ══════════ HEADER-INJECTION PATCH G1 (form) START ══════════
+  /** 渠道级请求头注入配置（保存原形，保留未知字段）。 */
+  headerInjection: HeaderInjectionSectionConfig;
+  // ══════════ HEADER-INJECTION PATCH G1 (form) END ══════════
 };

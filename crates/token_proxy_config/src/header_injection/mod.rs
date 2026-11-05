@@ -39,9 +39,16 @@ pub struct HeaderInjectionSection {
 pub struct HeaderInjectionChannel {
     /// 渠道级开关；缺省 false（所有渠道创建默认关闭）。
     pub enabled: bool,
+    /// 无标记/无会话头时的注入回退开关；缺省 false。
+    #[serde(skip_serializing_if = "is_false")]
+    pub fallback_enabled: bool,
     /// 注入规则列表（为扩展预留；当前只消费 canonical 会话规则）。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<HeaderInjectionRule>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// 单条注入规则。
@@ -78,6 +85,7 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeaderInjectionRuntime {
     pub target_header: HeaderName,
+    pub fallback_enabled: bool,
 }
 
 /// 容错反序列化：形态非法（字符串 / 数组 / 字段类型错误）时按「段不存在」处理，
@@ -139,7 +147,12 @@ pub fn resolve_channel(
             continue;
         }
         match normalize_target_header(&rule.target_header) {
-            Ok(target_header) => return Some(HeaderInjectionRuntime { target_header }),
+            Ok(target_header) => {
+                return Some(HeaderInjectionRuntime {
+                    target_header,
+                    fallback_enabled: channel.fallback_enabled,
+                })
+            }
             Err(reason) => {
                 tracing::warn!(
                     channel = channel_id,
@@ -193,6 +206,7 @@ impl HeaderInjectionSection {
         &mut self,
         channel_id: &str,
         target_header: Option<&str>,
+        fallback: Option<bool>,
     ) -> Result<(), String> {
         let id = channel_id.trim();
         if id.is_empty() {
@@ -222,6 +236,9 @@ impl HeaderInjectionSection {
 
         let channel = self.channels.entry(id.to_string()).or_default();
         channel.enabled = true;
+        if let Some(fallback) = fallback {
+            channel.fallback_enabled = fallback;
+        }
         if let Some(rule) = channel
             .rules
             .iter_mut()

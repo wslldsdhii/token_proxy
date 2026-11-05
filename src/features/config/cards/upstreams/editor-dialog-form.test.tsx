@@ -280,7 +280,7 @@ describe("upstreams/editor-dialog-form", () => {
         showApiKeys={false}
         onToggleApiKeys={vi.fn()}
         onChangeDraft={vi.fn()}
-        headerInjection={{ enabled: false, targetHeader: "X-Session-ID" }}
+        headerInjection={{ enabled: false, fallbackEnabled: false, targetHeader: "X-Session-ID" }}
         onHeaderInjectionChange={onHeaderInjectionChange}
       />
     );
@@ -291,6 +291,7 @@ describe("upstreams/editor-dialog-form", () => {
     await user.click(screen.getByTestId("upstream-header-injection-enable"));
     expect(onHeaderInjectionChange).toHaveBeenCalledWith({
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: "X-Session-ID",
     });
 
@@ -302,7 +303,77 @@ describe("upstreams/editor-dialog-form", () => {
     );
     expect(onHeaderInjectionChange).toHaveBeenCalledWith({
       enabled: false,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
+  });
+
+  it("renders the fallback checkbox without a visible label and disables it when injection is off", async () => {
+    const user = userEvent.setup();
+    const draft = createEmptyUpstream();
+
+    render(
+      <UpstreamEditorFields
+        draft={draft}
+        providerOptions={["openai"]}
+        appProxyUrl=""
+        showApiKeys={false}
+        onToggleApiKeys={vi.fn()}
+        onChangeDraft={vi.fn()}
+        headerInjection={{ enabled: false, fallbackEnabled: true, targetHeader: "X-Session-ID" }}
+        onHeaderInjectionChange={vi.fn()}
+      />
+    );
+
+    const checkbox = screen.getByTestId("upstream-header-injection-fallback");
+    expect(checkbox).toBeDisabled();
+    expect(checkbox).toHaveAttribute("aria-label", m.upstreams_header_injection_fallback_tip());
+    expect(screen.queryByText(m.upstreams_header_injection_fallback_tip())).not.toBeInTheDocument();
+
+    await user.hover(checkbox);
+    expect(
+      await screen.findByText(m.upstreams_header_injection_fallback_tip()),
+    ).toBeInTheDocument();
+  });
+
+  it("toggles fallback only while injection is enabled", async () => {
+    const user = userEvent.setup();
+    const draft = createEmptyUpstream();
+    const onHeaderInjectionChange = vi.fn();
+
+    const { rerender } = render(
+      <UpstreamEditorFields
+        draft={draft}
+        providerOptions={["openai"]}
+        appProxyUrl=""
+        showApiKeys={false}
+        onToggleApiKeys={vi.fn()}
+        onChangeDraft={vi.fn()}
+        headerInjection={{ enabled: true, fallbackEnabled: false, targetHeader: "X-Session-ID" }}
+        onHeaderInjectionChange={onHeaderInjectionChange}
+      />
+    );
+
+    await user.click(screen.getByTestId("upstream-header-injection-fallback"));
+    expect(onHeaderInjectionChange).toHaveBeenCalledWith({
+      enabled: true,
+      fallbackEnabled: true,
+      targetHeader: "X-Session-ID",
+    });
+
+    rerender(
+      <UpstreamEditorFields
+        draft={draft}
+        providerOptions={["openai"]}
+        appProxyUrl=""
+        showApiKeys={false}
+        onToggleApiKeys={vi.fn()}
+        onChangeDraft={vi.fn()}
+        headerInjection={{ enabled: false, fallbackEnabled: true, targetHeader: "X-Session-ID" }}
+        onHeaderInjectionChange={onHeaderInjectionChange}
+      />
+    );
+    expect(screen.getByTestId("upstream-header-injection-fallback")).toBeDisabled();
+    expect(screen.getByTestId("upstream-header-injection-fallback")).toBeChecked();
   });
 });

@@ -627,6 +627,10 @@ async fn build_proxy_state(
     let kiro_accounts = ctx.kiro_accounts.clone();
     let codex_accounts = ctx.codex_accounts.clone();
     let xai_accounts = ctx.xai_accounts.clone();
+    // ══════════ HEADER-INJECTION FALLBACK PATCH 3 (store) START ══════════
+    let session_fallback =
+        super::session_fallback::SessionFallbackStore::new(ctx.paths.data_dir());
+    // ══════════ HEADER-INJECTION FALLBACK PATCH 3 (store) END ══════════
     Ok(Arc::new(ProxyState {
         upstream_selector: super::upstream_selector::UpstreamSelectorRuntime::new_with_cooldown(
             config.retryable_failure_cooldown,
@@ -646,6 +650,7 @@ async fn build_proxy_state(
         codex_accounts,
         codex_turn_state: super::codex_turn_state::CodexTurnStateProvenance::new(),
         xai_accounts,
+        session_fallback,
     }))
 }
 

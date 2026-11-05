@@ -80,6 +80,7 @@ async fn buffered_xai_forbidden(body: &'static str) -> Response {
         None,
         None,
         None,
+        None,
         Duration::from_secs(1),
     )
     .await
@@ -144,6 +145,7 @@ async fn buffered_xai_json_restores_custom_tool_call() {
         None,
         None,
         None,
+        None,
         Duration::from_secs(1),
     )
     .await;
@@ -185,6 +187,7 @@ async fn buffered_xai_mislabeled_sse_restores_custom_tool_call() {
         tracker,
         FormatTransform::None,
         Some(xai_client_tool_mapping()),
+        None,
         None,
         None,
         None,
@@ -290,6 +293,7 @@ async fn buffered_responses_502_normalizes_complete_error_contract() {
         None,
         None,
         None,
+        None,
         Duration::from_secs(1),
     )
     .await;
@@ -339,6 +343,7 @@ async fn buffered_responses_complete_error_preserves_body_and_content_length() {
         None,
         None,
         None,
+        None,
         Duration::from_secs(1),
     )
     .await;
@@ -383,6 +388,7 @@ async fn buffered_passthrough_model_override_strips_stale_content_length() {
         tracker,
         FormatTransform::None,
         None,
+        None,
         Some("glm-5.3-flash-plan-proxy"),
         None,
         None,
@@ -426,6 +432,7 @@ async fn buffered_passthrough_without_override_preserves_upstream_content_length
         Arc::new(LogWriter::new(None)),
         tracker,
         FormatTransform::None,
+        None,
         None,
         None,
         None,
@@ -478,6 +485,7 @@ async fn xai_video_content_preserves_binary_body_and_content_type() {
         Arc::new(LogWriter::new(None)),
         tracker,
         FormatTransform::None,
+        None,
         None,
         None,
         None,
@@ -695,6 +703,7 @@ async fn buffered_non_stream_event_stream_chat_completion_returns_json() {
         None,
         None,
         None,
+        None,
         Duration::from_secs(1),
     )
     .await;
@@ -724,6 +733,7 @@ async fn buffered_non_stream_total_body_timeout_returns_retryable_504() {
         Arc::new(LogWriter::new(None)),
         tracker,
         FormatTransform::None,
+        None,
         None,
         None,
         None,
@@ -776,6 +786,7 @@ async fn buffered_non_stream_responses_event_stream_chat_request_returns_json() 
         None,
         None,
         None,
+        None,
         Duration::from_secs(1),
     )
     .await;
@@ -821,6 +832,7 @@ async fn buffered_json_response_with_responses_sse_body_returns_json() {
         Arc::new(LogWriter::new(None)),
         tracker,
         FormatTransform::None,
+        None,
         None,
         None,
         None,
@@ -985,4 +997,121 @@ fn empty_chat_completion_retry_message_skips_non_chat_outputs() {
         FormatTransform::ChatToResponses
     )
     .is_none());
+}
+
+fn fallback_test_dir(label: &str) -> std::path::PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "token_proxy_buffered_fallback_{label}_{stamp}"
+    ));
+    std::fs::create_dir_all(&path).expect("fallback test dir");
+    path
+}
+
+async fn openai_upstream(body: &'static str, status: StatusCode) -> reqwest::Response {
+    axum::http::Response::builder()
+        .status(status)
+        .header(CONTENT_TYPE, "application/json")
+        .body(reqwest::Body::from(body))
+        .expect("response")
+        .into()
+}
+
+#[tokio::test]
+async fn buffered_fallback_commits_first_assistant_text() {
+    use crate::proxy::session_fallback::{
+        extract::{assistant_hash, binding_hash, user_hash},
+        FallbackResolution, SessionFallbackStore,
+    };
+
+    let dir = fallback_test_dir("commit");
+    let store = SessionFallbackStore::new_for_test(&dir);
+    let user = user_hash("hi");
+    let capture = match store.resolve("airouter", "req-1", &user, None) {
+        FallbackResolution::Pending { capture, .. } => capture,
+        _ => panic!("expected pending"),
+    };
+    let tracker = TokenRateTracker::new().register(None, None).await;
+    let response = build_buffered_response(
+        StatusCode::OK,
+        openai_upstream(r#"{"choices":[{"message":{"content":"hello"}}]}"#, StatusCode::OK).await,
+        HeaderMap::new(),
+        test_context(),
+        Arc::new(LogWriter::new(None)),
+        tracker,
+        FormatTransform::None,
+        None,
+        Some(capture),
+        None,
+        None,
+        None,
+        Duration::from_secs(1),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let expected = binding_hash(&user, &assistant_hash("hello"));
+    let raw = std::fs::read_to_string(store.file_path()).expect("mapping file");
+    let value: serde_json::Value = serde_json::from_str(&raw).expect("mapping json");
+    let entries = value["entries"].as_array().expect("entries");
+    assert!(entries
+        .iter()
+        .any(|entry| entry["hash"] == expected.as_str() && entry["id"].as_str().is_some()));
+}
+
+#[tokio::test]
+async fn buffered_fallback_skips_error_and_transform() {
+    use crate::proxy::session_fallback::{extract::user_hash, FallbackResolution, SessionFallbackStore};
+
+    let dir = fallback_test_dir("skip");
+    let store = SessionFallbackStore::new_for_test(&dir);
+    let user = user_hash("hi");
+    let capture = match store.resolve("airouter", "req-error", &user, None) {
+        FallbackResolution::Pending { capture, .. } => capture,
+        _ => panic!("expected pending"),
+    };
+    let tracker = TokenRateTracker::new().register(None, None).await;
+    let _ = build_buffered_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        openai_upstream(r#"{"error":"boom"}"#, StatusCode::INTERNAL_SERVER_ERROR).await,
+        HeaderMap::new(),
+        test_context(),
+        Arc::new(LogWriter::new(None)),
+        tracker,
+        FormatTransform::None,
+        None,
+        Some(capture),
+        None,
+        None,
+        None,
+        Duration::from_secs(1),
+    )
+    .await;
+    assert_eq!(store.pending_len(), 1, "error response must not bind");
+
+    let capture = match store.resolve("airouter", "req-transform", &user, None) {
+        FallbackResolution::Pending { capture, .. } => capture,
+        _ => panic!("expected pending"),
+    };
+    let tracker = TokenRateTracker::new().register(None, None).await;
+    let _ = build_buffered_response(
+        StatusCode::OK,
+        openai_upstream(r#"{"choices":[{"message":{"content":"hello"}}]}"#, StatusCode::OK).await,
+        HeaderMap::new(),
+        test_context(),
+        Arc::new(LogWriter::new(None)),
+        tracker,
+        FormatTransform::ChatToResponses,
+        None,
+        Some(capture),
+        None,
+        None,
+        None,
+        Duration::from_secs(1),
+    )
+    .await;
+    assert_eq!(store.pending_len(), 2, "transformed response must not bind");
 }

@@ -21,6 +21,7 @@ use super::super::super::{
     },
     redact::redact_query_param_value,
     server_helpers::log_debug_headers_body,
+    session_fallback::{self, SessionFallbackCapture},
     sse::SseEventParser,
     token_rate::RequestTokenTracker,
 };
@@ -301,6 +302,7 @@ pub(super) async fn build_stream_response(
     request_tracker: RequestTokenTracker,
     response_transform: FormatTransform,
     xai_client_tools: Option<token_proxy_protocol::xai_client_tools::XaiClientToolMapping>,
+    fallback_capture: Option<SessionFallbackCapture>,
     model_override: Option<&str>,
     estimated_input_tokens: Option<u64>,
     response_format: Option<&str>,
@@ -324,6 +326,24 @@ pub(super) async fn build_stream_response(
     {
         Ok(stream) => stream,
         Err(response) => return response,
+    };
+    let upstream = match fallback_capture {
+        Some(capture)
+            if response_transform == FormatTransform::None
+                && context.provider == PROVIDER_OPENAI
+                && is_chat_completions_path(&context.path) =>
+        {
+            session_fallback::stream::wrap_stream(upstream, capture)
+        }
+        Some(_) => {
+            tracing::warn!(
+                provider = %context.provider,
+                path = %context.path,
+                "session fallback stream capture skipped: unsupported protocol or transform"
+            );
+            upstream
+        }
+        None => upstream,
     };
     log_debug_headers_body(
         "upstream.response.headers",
@@ -2131,6 +2151,6 @@ fn is_openai_responses_stream_path(path: &str) -> bool {
     path == "/v1/responses" || path.starts_with("/v1/responses/")
 }
 
-fn is_chat_completions_path(path: &str) -> bool {
+pub(super) fn is_chat_completions_path(path: &str) -> bool {
     path.split_once('?').map(|(path, _)| path).unwrap_or(path) == "/v1/chat/completions"
 }

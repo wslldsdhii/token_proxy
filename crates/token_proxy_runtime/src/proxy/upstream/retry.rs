@@ -21,6 +21,8 @@ pub(super) struct UpstreamAttempt {
     /// 发送上游前已 register，覆盖 TTFB；成功后移入 response stream。
     pub(super) token_tracker: RequestTokenTracker,
     pub(super) xai_client_tools: Option<XaiClientToolMapping>,
+    /// 首轮回退 ID 的响应侧提交句柄。
+    pub(super) fallback_capture: Option<crate::proxy::session_fallback::SessionFallbackCapture>,
     /// Agent Identity 401 已由账户层分类或恢复，禁止 dispatch 再原地重放整条链路。
     pub(super) skip_same_upstream_retry: bool,
 }
@@ -128,6 +130,7 @@ pub(super) async fn finalize_attempt(
         response_transform,
         attempt.xai_client_tools,
         request_detail,
+        attempt.fallback_capture,
         cooldown_scope,
     )
     .await;
@@ -349,6 +352,7 @@ async fn retry_after_agent_identity_task_recovery(
         timings,
         token_tracker,
         xai_client_tools,
+        fallback_capture,
         skip_same_upstream_retry: _,
     } = first;
     let status = response.status();
@@ -385,6 +389,7 @@ async fn retry_after_agent_identity_task_recovery(
             timings,
             token_tracker,
             xai_client_tools,
+            fallback_capture,
             skip_same_upstream_retry: true,
         });
     }

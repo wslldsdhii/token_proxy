@@ -49,6 +49,7 @@ export function readChannelDraft(
   const channel = section.channels?.[channelId.trim()];
   return {
     enabled: channel?.enabled === true,
+    fallbackEnabled: channel?.fallback_enabled === true,
     targetHeader: normalizeTargetHeader(findSessionRule(channel)?.target_header),
   };
 }
@@ -99,7 +100,17 @@ export function applyChannelDraft(
     rules.push(nextRule);
   }
 
-  channels[id] = { ...base, enabled: draft.enabled, rules };
+  const nextChannel: HeaderInjectionChannelConfig = {
+    ...base,
+    enabled: draft.enabled,
+    rules,
+  };
+  if (draft.fallbackEnabled) {
+    nextChannel.fallback_enabled = true;
+  } else {
+    delete nextChannel.fallback_enabled;
+  }
+  channels[id] = nextChannel;
   return {
     ...section,
     version: section.version ?? HEADER_INJECTION_VERSION,

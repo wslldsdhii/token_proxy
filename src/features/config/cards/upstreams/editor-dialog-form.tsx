@@ -2,6 +2,7 @@ import { ChevronDown, CirclePlus, HelpCircle } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -499,27 +500,47 @@ function UpstreamHeaderInjectionFields({
         <Label htmlFor="upstream-header-injection-target">
           {m.upstreams_header_injection_target()}
         </Label>
-        <Select
-          value={draft.targetHeader}
-          onValueChange={(targetHeader) => onChange({ ...draft, targetHeader })}
-        >
-          <SelectTrigger
-            id="upstream-header-injection-target"
-            className="w-full"
-            data-testid="upstream-header-injection-target"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TARGET_HEADER_OPTIONS.map((value) => (
-              <SelectItem key={value} value={value}>
-                {value === "X-Opencode-Session"
-                  ? m.upstreams_header_injection_option_opencode()
-                  : m.upstreams_header_injection_option_session()}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <Select
+              value={draft.targetHeader}
+              onValueChange={(targetHeader) => onChange({ ...draft, targetHeader })}
+            >
+              <SelectTrigger
+                id="upstream-header-injection-target"
+                className="w-full"
+                data-testid="upstream-header-injection-target"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TARGET_HEADER_OPTIONS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {value === "X-Opencode-Session"
+                      ? m.upstreams_header_injection_option_opencode()
+                      : m.upstreams_header_injection_option_session()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Checkbox
+                checked={draft.fallbackEnabled}
+                disabled={!draft.enabled}
+                onCheckedChange={(checked) =>
+                  onChange({ ...draft, fallbackEnabled: checked === true })
+                }
+                aria-label={m.upstreams_header_injection_fallback_tip()}
+                data-testid="upstream-header-injection-fallback"
+              />
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {m.upstreams_header_injection_fallback_tip()}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       <p className="text-xs text-muted-foreground">
@@ -580,7 +601,11 @@ export function UpstreamEditorFields({
   onToggleApiKeys,
   onChangeDraft,
   prefillSuffixDefaults = false,
-  headerInjection = { enabled: false, targetHeader: DEFAULT_TARGET_HEADER },
+  headerInjection = {
+    enabled: false,
+    fallbackEnabled: false,
+    targetHeader: DEFAULT_TARGET_HEADER,
+  },
   onHeaderInjectionChange = () => undefined,
 }: UpstreamEditorFieldsProps) {
   return (

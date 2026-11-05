@@ -12,6 +12,9 @@ mod gemini_compat;
 // ══════════ HEADER-INJECTION PATCH 6 (module) START ══════════
 mod header_injection;
 // ══════════ HEADER-INJECTION PATCH 6 (module) END ══════════
+// ══════════ HEADER-INJECTION FALLBACK PATCH 1 (module) START ══════════
+mod session_fallback;
+// ══════════ HEADER-INJECTION FALLBACK PATCH 1 (module) END ══════════
 mod http;
 mod http_client;
 mod inbound;
@@ -64,6 +67,9 @@ struct ProxyState {
     codex_accounts: Arc<CodexAccountStore>,
     codex_turn_state: codex_turn_state::CodexTurnStateProvenance,
     xai_accounts: Arc<XaiAccountStore>,
+    // ══════════ HEADER-INJECTION FALLBACK PATCH 2 (state) START ══════════
+    session_fallback: Arc<session_fallback::SessionFallbackStore>,
+    // ══════════ HEADER-INJECTION FALLBACK PATCH 2 (state) END ══════════
 }
 
 struct RequestMeta {

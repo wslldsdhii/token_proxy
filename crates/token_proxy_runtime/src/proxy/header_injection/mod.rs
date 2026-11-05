@@ -9,6 +9,9 @@ use axum::http::{HeaderMap, HeaderValue};
 
 use super::config::{header_injection::HeaderInjectionRuntime, UpstreamRuntime};
 use super::request_body::ReplayableBody;
+use super::session_fallback::{
+    extract as fallback_extract, FallbackResolution, SessionFallbackCapture, SessionFallbackStore,
+};
 
 /// 钩子输出标记的固定前缀（与 `myplugins/trae-hooks` 契约一致）。
 pub(super) const SESSION_MARKER_PREFIX: &str = "[[token-proxy-session-v1:";
@@ -20,60 +23,136 @@ const MAX_SESSION_ID_LEN: usize = 64;
 const MARKER_WINDOW_BYTES: usize = 128;
 
 /// 出站 Header 注入入口：`prepare_upstream_request_with_body` 在 `build_request_headers` 之后调用。
-pub(super) fn apply(upstream: &UpstreamRuntime, body: &ReplayableBody, headers: &mut HeaderMap) {
+///
+/// 返回 `Some(capture)` 时表示首轮回退 ID 已注入，响应侧需要用该 capture 提交绑定。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply(
+    fallback_store: Option<&SessionFallbackStore>,
+    upstream: &UpstreamRuntime,
+    body: &ReplayableBody,
+    headers: &mut HeaderMap,
+    request_id: &str,
+) -> Option<SessionFallbackCapture> {
     apply_config(
         upstream.id.as_str(),
         upstream.header_injection.as_ref(),
+        fallback_store,
         body.as_bytes(),
         headers,
-    );
+        request_id,
+    )
 }
 
 fn apply_config(
     upstream_id: &str,
     config: Option<&HeaderInjectionRuntime>,
+    fallback_store: Option<&SessionFallbackStore>,
     body: &[u8],
     headers: &mut HeaderMap,
-) {
+    request_id: &str,
+) -> Option<SessionFallbackCapture> {
     let Some(config) = config else {
-        return;
+        return None;
     };
     if body.is_empty() {
-        return;
+        return None;
     }
 
-    let Some(session_id) = extract_session_id(body) else {
+    if let Some(session_id) = extract_session_id(body) {
+        if headers.contains_key(&config.target_header) {
+            tracing::debug!(
+                upstream_id,
+                header = %config.target_header,
+                "header injection skipped: target header already present"
+            );
+            return None;
+        }
+
+        let Ok(value) = HeaderValue::from_str(session_id) else {
+            tracing::warn!(
+                upstream_id,
+                "header injection skipped: session id is not a valid header value"
+            );
+            return None;
+        };
+
+        headers.insert(config.target_header.clone(), value);
+        tracing::debug!(
+            upstream_id,
+            header = %config.target_header,
+            session_id,
+            "injected session header from hook marker"
+        );
+        return None;
+    }
+
+    if !config.fallback_enabled {
         tracing::debug!(
             upstream_id,
             "header injection enabled but no session marker found"
         );
-        return;
+        return None;
+    }
+
+    if headers.contains_key("x-session-id") || headers.contains_key("x-opencode-session") {
+        tracing::debug!(
+            upstream_id,
+            "session fallback skipped: inbound session header already present"
+        );
+        return None;
+    }
+
+    let Some(store) = fallback_store else {
+        tracing::debug!(upstream_id, "session fallback skipped: store unavailable");
+        return None;
+    };
+    let Some(exchange) = fallback_extract::extract_first_exchange(body) else {
+        tracing::debug!(
+            upstream_id,
+            "session fallback skipped: no first user/assistant exchange"
+        );
+        return None;
+    };
+
+    let user_hash = fallback_extract::user_hash(&exchange.user);
+    let assistant_hash = exchange
+        .assistant
+        .as_deref()
+        .map(fallback_extract::assistant_hash);
+    let (id, capture) = match store.resolve(
+        upstream_id,
+        request_id,
+        &user_hash,
+        assistant_hash.as_deref(),
+    ) {
+        FallbackResolution::Existing(id) => (id, None),
+        FallbackResolution::Pending { id, capture } => (id, Some(capture)),
     };
 
     if headers.contains_key(&config.target_header) {
         tracing::debug!(
             upstream_id,
             header = %config.target_header,
-            "header injection skipped: target header already present"
+            "session fallback skipped: target header already present"
         );
-        return;
+        return None;
     }
-
-    let Ok(value) = HeaderValue::from_str(session_id) else {
+    let Ok(value) = HeaderValue::from_str(&id) else {
         tracing::warn!(
             upstream_id,
-            "header injection skipped: session id is not a valid header value"
+            "session fallback skipped: generated id is not a valid header value"
         );
-        return;
+        return None;
     };
-
     headers.insert(config.target_header.clone(), value);
     tracing::debug!(
         upstream_id,
         header = %config.target_header,
-        session_id,
-        "injected session header from hook marker"
+        id,
+        pending = capture.is_some(),
+        "injected session fallback header"
     );
+    capture
 }
 
 /// 返回请求体文本中**最后一次**合法标记里的会话 ID。

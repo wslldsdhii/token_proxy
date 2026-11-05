@@ -33,6 +33,7 @@ describe("config/header-injection", () => {
   it("reads a missing channel as disabled with the default header", () => {
     expect(readChannelDraft(emptySection(), "trae")).toEqual({
       enabled: false,
+      fallbackEnabled: false,
       targetHeader: DEFAULT_TARGET_HEADER,
     });
   });
@@ -41,6 +42,7 @@ describe("config/header-injection", () => {
     const section = emptySection();
     const next = applyChannelDraft(section, "trae", {
       enabled: false,
+      fallbackEnabled: false,
       targetHeader: DEFAULT_TARGET_HEADER,
     });
     expect(next).toBe(section);
@@ -50,6 +52,7 @@ describe("config/header-injection", () => {
   it("creates the canonical rule on enable", () => {
     const next = applyChannelDraft(emptySection(), "trae", {
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
     expect(next.channels?.trae.enabled).toBe(true);
@@ -67,10 +70,12 @@ describe("config/header-injection", () => {
   it("keeps the record and target header when disabled", () => {
     const enabled = applyChannelDraft(emptySection(), "trae", {
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
     const disabled = applyChannelDraft(enabled, "trae", {
       enabled: false,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
     expect(disabled.channels?.trae.enabled).toBe(false);
@@ -95,6 +100,7 @@ describe("config/header-injection", () => {
     };
     const next = applyChannelDraft(section, "trae", {
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
     expect(next.future_domain_flag).toBe(true);
@@ -109,6 +115,7 @@ describe("config/header-injection", () => {
   it("renames a channel record and leaves others untouched", () => {
     const section = applyChannelDraft(emptySection(), "old", {
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
     const next = renameChannel(section, "old", "new");
@@ -122,6 +129,7 @@ describe("config/header-injection", () => {
     expect(toHeaderInjectionPayload(emptySection())).toBeUndefined();
     const section = applyChannelDraft(emptySection(), "trae", {
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: DEFAULT_TARGET_HEADER,
     });
     expect(toHeaderInjectionPayload(section)).toEqual(section);
@@ -133,7 +141,7 @@ describe("config/header-injection editor save", () => {
     const section = emptySection();
     const next = applyEditorSave(section, {
       channelId: "brand-new",
-      draft: { enabled: false, targetHeader: DEFAULT_TARGET_HEADER },
+      draft: { enabled: false, fallbackEnabled: false, targetHeader: DEFAULT_TARGET_HEADER },
     });
     expect(next.channels).toEqual({});
   });
@@ -141,12 +149,13 @@ describe("config/header-injection editor save", () => {
   it("migrates the record when the channel id changes", () => {
     const section = applyChannelDraft(emptySection(), "old", {
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
     const next = applyEditorSave(section, {
       originalId: "old",
       channelId: "new",
-      draft: { enabled: true, targetHeader: "X-Opencode-Session" },
+      draft: { enabled: true, fallbackEnabled: false, targetHeader: "X-Opencode-Session" },
     });
     expect(next.channels?.old).toBeUndefined();
     expect(next.channels?.new.enabled).toBe(true);
@@ -156,14 +165,67 @@ describe("config/header-injection editor save", () => {
   it("keeps a disabled record when editing an enabled channel", () => {
     const section = applyChannelDraft(emptySection(), "trae", {
       enabled: true,
+      fallbackEnabled: false,
       targetHeader: "X-Opencode-Session",
     });
     const next = applyEditorSave(section, {
       originalId: "trae",
       channelId: "trae",
-      draft: { enabled: false, targetHeader: "X-Opencode-Session" },
+      draft: { enabled: false, fallbackEnabled: false, targetHeader: "X-Opencode-Session" },
     });
     expect(next.channels?.trae.enabled).toBe(false);
     expect(next.channels?.trae.rules?.[0].target_header).toBe("X-Opencode-Session");
+  });
+});
+
+describe("config/header-injection fallback", () => {
+  it("reads the per-channel fallback flag", () => {
+    const section: HeaderInjectionSectionConfig = {
+      version: 1,
+      channels: { trae: { enabled: true, fallback_enabled: true } },
+    };
+    expect(readChannelDraft(section, "trae").fallbackEnabled).toBe(true);
+    expect(readChannelDraft(emptySection(), "trae").fallbackEnabled).toBe(false);
+  });
+
+  it("writes and removes fallback_enabled", () => {
+    const enabled = applyChannelDraft(emptySection(), "trae", {
+      enabled: true,
+      fallbackEnabled: true,
+      targetHeader: DEFAULT_TARGET_HEADER,
+    });
+    expect(enabled.channels?.trae.fallback_enabled).toBe(true);
+
+    const disabled = applyChannelDraft(enabled, "trae", {
+      enabled: true,
+      fallbackEnabled: false,
+      targetHeader: DEFAULT_TARGET_HEADER,
+    });
+    expect(disabled.channels?.trae.fallback_enabled).toBeUndefined();
+  });
+
+  it("keeps fallback when injection is disabled", () => {
+    const enabled = applyChannelDraft(emptySection(), "trae", {
+      enabled: true,
+      fallbackEnabled: true,
+      targetHeader: DEFAULT_TARGET_HEADER,
+    });
+    const disabled = applyChannelDraft(enabled, "trae", {
+      enabled: false,
+      fallbackEnabled: true,
+      targetHeader: DEFAULT_TARGET_HEADER,
+    });
+    expect(disabled.channels?.trae.enabled).toBe(false);
+    expect(disabled.channels?.trae.fallback_enabled).toBe(true);
+  });
+
+  it("keeps fallback through channel rename", () => {
+    const section = applyChannelDraft(emptySection(), "old", {
+      enabled: true,
+      fallbackEnabled: true,
+      targetHeader: DEFAULT_TARGET_HEADER,
+    });
+    const renamed = renameChannel(section, "old", "new");
+    expect(renamed.channels?.new.fallback_enabled).toBe(true);
   });
 });

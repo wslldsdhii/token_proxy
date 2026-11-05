@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use super::super::log::{LogContext, LogWriter};
 use super::super::openai_compat::FormatTransform;
+use super::super::session_fallback::SessionFallbackCapture;
 use super::super::token_rate::RequestTokenTracker;
 use token_proxy_protocol::xai_client_tools::XaiClientToolMapping;
 
@@ -20,6 +21,7 @@ pub(super) async fn build_stream_response(
     request_tracker: RequestTokenTracker,
     response_transform: FormatTransform,
     xai_client_tools: Option<XaiClientToolMapping>,
+    fallback_capture: Option<SessionFallbackCapture>,
     model_override: Option<&str>,
     estimated_input_tokens: Option<u64>,
     response_format: Option<&str>,
@@ -36,6 +38,7 @@ pub(super) async fn build_stream_response(
         request_tracker,
         response_transform,
         xai_client_tools,
+        fallback_capture,
         model_override,
         estimated_input_tokens,
         response_format,
@@ -55,6 +58,7 @@ pub(super) async fn build_buffered_response(
     request_tracker: RequestTokenTracker,
     response_transform: FormatTransform,
     xai_client_tools: Option<XaiClientToolMapping>,
+    fallback_capture: Option<SessionFallbackCapture>,
     model_override: Option<&str>,
     estimated_input_tokens: Option<u64>,
     response_format: Option<&str>,
@@ -69,6 +73,7 @@ pub(super) async fn build_buffered_response(
         request_tracker,
         response_transform,
         xai_client_tools,
+        fallback_capture,
         model_override,
         estimated_input_tokens,
         response_format,

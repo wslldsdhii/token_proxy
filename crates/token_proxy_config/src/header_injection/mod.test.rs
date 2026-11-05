@@ -10,7 +10,11 @@ fn rule(id: &str, enabled: bool, source: &str, header: &str) -> HeaderInjectionR
 }
 
 fn channel(enabled: bool, rules: Vec<HeaderInjectionRule>) -> HeaderInjectionChannel {
-    HeaderInjectionChannel { enabled, rules }
+    HeaderInjectionChannel {
+        enabled,
+        fallback_enabled: false,
+        rules,
+    }
 }
 
 fn section_with(enabled: bool, header: &str) -> HeaderInjectionSection {
@@ -171,7 +175,7 @@ fn rule_enabled_defaults_to_true() {
 #[test]
 fn enable_channel_creates_canonical_rule_with_default_header() {
     let mut section = HeaderInjectionSection::default();
-    section.enable_channel("trae", None).expect("enable");
+    section.enable_channel("trae", None, None).expect("enable");
     assert_eq!(section.version, Some(SUPPORTED_VERSION));
     let channel = section.channels.get("trae").expect("channel");
     assert!(channel.enabled);
@@ -185,7 +189,7 @@ fn enable_channel_creates_canonical_rule_with_default_header() {
 #[test]
 fn enable_channel_preserves_existing_header_when_omitted() {
     let mut section = section_with(false, "X-Opencode-Session");
-    section.enable_channel("trae", None).expect("enable");
+    section.enable_channel("trae", None, None).expect("enable");
     let channel = section.channels.get("trae").expect("channel");
     assert!(channel.enabled);
     assert_eq!(channel.rules[0].target_header, "X-Opencode-Session");
@@ -201,7 +205,7 @@ fn enable_channel_updates_header_and_preserves_extra_rules() {
         "X-Future",
     ));
     section
-        .enable_channel("trae", Some("X-Opencode-Session"))
+        .enable_channel("trae", Some("X-Opencode-Session"), None)
         .expect("enable");
     let rules = &section.channels.get("trae").unwrap().rules;
     assert_eq!(rules.len(), 2);
@@ -212,14 +216,73 @@ fn enable_channel_updates_header_and_preserves_extra_rules() {
 #[test]
 fn enable_channel_rejects_invalid_header() {
     let mut section = HeaderInjectionSection::default();
-    assert!(section.enable_channel("trae", Some("bad header")).is_err());
+    assert!(section.enable_channel("trae", Some("bad header"), None).is_err());
     assert!(section.channels.is_empty());
 }
 
 #[test]
 fn enable_channel_requires_channel_id() {
     let mut section = HeaderInjectionSection::default();
-    assert!(section.enable_channel("  ", None).is_err());
+    assert!(section.enable_channel("  ", None, None).is_err());
+}
+
+#[test]
+fn enabled_channel_carries_fallback_flag() {
+    let mut section = section_with(true, DEFAULT_TARGET_HEADER);
+    section.channels.get_mut("trae").unwrap().fallback_enabled = true;
+    let runtime = resolve_channel(Some(&section), "trae").expect("resolved");
+    assert!(runtime.fallback_enabled);
+
+    section.channels.get_mut("trae").unwrap().fallback_enabled = false;
+    let runtime = resolve_channel(Some(&section), "trae").expect("resolved");
+    assert!(!runtime.fallback_enabled);
+}
+
+#[test]
+fn enable_channel_preserves_existing_fallback_when_omitted() {
+    let mut section = section_with(false, "X-Opencode-Session");
+    section.channels.get_mut("trae").unwrap().fallback_enabled = true;
+    section.enable_channel("trae", None, None).expect("enable");
+    assert!(section.channels.get("trae").unwrap().fallback_enabled);
+}
+
+#[test]
+fn enable_channel_sets_fallback_explicitly() {
+    let mut section = HeaderInjectionSection::default();
+    section
+        .enable_channel("trae", None, Some(true))
+        .expect("enable");
+    assert!(section.channels.get("trae").unwrap().fallback_enabled);
+
+    section
+        .enable_channel("trae", None, Some(false))
+        .expect("update");
+    assert!(!section.channels.get("trae").unwrap().fallback_enabled);
+}
+
+#[test]
+fn disable_channel_keeps_fallback() {
+    let mut section = section_with(true, "X-Opencode-Session");
+    section.channels.get_mut("trae").unwrap().fallback_enabled = true;
+    assert!(section.disable_channel("trae"));
+    let channel = section.channels.get("trae").expect("record kept");
+    assert!(!channel.enabled);
+    assert!(channel.fallback_enabled);
+    assert_eq!(channel.rules[0].target_header, "X-Opencode-Session");
+}
+
+#[test]
+fn fallback_false_is_omitted_from_json() {
+    let section = section_with(true, DEFAULT_TARGET_HEADER);
+    let json = serde_json::to_string(&section).expect("serialize");
+    assert!(!json.contains("fallback_enabled"));
+
+    let mut section = section;
+    section.channels.get_mut("trae").unwrap().fallback_enabled = true;
+    let json = serde_json::to_string(&section).expect("serialize");
+    assert!(json.contains("\"fallback_enabled\":true"));
+    let parsed: HeaderInjectionSection = serde_json::from_str(&json).expect("deserialize");
+    assert!(parsed.channels.get("trae").unwrap().fallback_enabled);
 }
 
 #[test]

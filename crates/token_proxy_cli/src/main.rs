@@ -68,6 +68,9 @@ enum HeaderInjectionCommand {
         /// 目标 Header；缺省 X-Session-ID，可选 X-Opencode-Session
         #[arg(long)]
         header: Option<String>,
+        /// 开启无标记/无会话头时的注入回退（保留已有回退设置）
+        #[arg(long)]
+        fallback: bool,
     },
     /// 关闭某渠道的头注入（保留记录）
     Disable {
@@ -137,13 +140,18 @@ fn mutate_header_injection(
 
     match command {
         HeaderInjectionCommand::List => Ok((false, String::new())),
-        HeaderInjectionCommand::Enable { channel, header } => {
+        HeaderInjectionCommand::Enable {
+            channel,
+            header,
+            fallback,
+        } => {
             // 先校验显式目标 Header，避免失败时在内存里留下半成品段（写盘虽已被 ? 阻断）。
             if let Some(value) = header.as_deref() {
                 token_proxy_config::header_injection::normalize_target_header(value)?;
             }
             let section = config.header_injection.get_or_insert_with(Default::default);
-            section.enable_channel(&channel, header.as_deref())?;
+            let fallback = fallback.then_some(true);
+            section.enable_channel(&channel, header.as_deref(), fallback)?;
             let target = section
                 .channels
                 .get(channel.trim())
@@ -204,8 +212,8 @@ fn print_header_injection_list(config: &token_proxy_config::ProxyConfigFile) {
         return;
     }
     println!(
-        "{:<28} {:<8} {:<24} {:<24}",
-        "CHANNEL", "ENABLED", "SOURCE", "TARGET_HEADER"
+        "{:<28} {:<8} {:<9} {:<24} {:<24}",
+        "CHANNEL", "ENABLED", "FALLBACK", "SOURCE", "TARGET_HEADER"
     );
     for row in header_injection_rows(config, section) {
         println!("{row}");
@@ -233,9 +241,10 @@ fn header_injection_rows(
                 .iter()
                 .any(|upstream| upstream.id.trim() == id.trim());
             format!(
-                "{:<28} {:<8} {:<24} {:<24}{}",
+                "{:<28} {:<8} {:<9} {:<24} {:<24}{}",
                 id,
                 channel.enabled,
+                channel.fallback_enabled,
                 source,
                 target,
                 if orphan { "  (channel not found)" } else { "" }
@@ -360,13 +369,36 @@ mod tests {
             "trae",
             "--header",
             "X-Opencode-Session",
+            "--fallback",
         ]) {
             ConfigCommand::HeaderInjection {
-                command: HeaderInjectionCommand::Enable { channel, header },
+                command: HeaderInjectionCommand::Enable {
+                    channel,
+                    header,
+                    fallback,
+                },
             } => {
                 assert_eq!(channel, "trae");
                 assert_eq!(header.as_deref(), Some("X-Opencode-Session"));
+                assert!(fallback);
             }
+            _ => panic!("expected header-injection enable"),
+        }
+    }
+
+    #[test]
+    fn parses_header_injection_enable_without_fallback() {
+        match parse_config_command(&[
+            "token-proxy",
+            "config",
+            "header-injection",
+            "enable",
+            "--channel",
+            "trae",
+        ]) {
+            ConfigCommand::HeaderInjection {
+                command: HeaderInjectionCommand::Enable { fallback, .. },
+            } => assert!(!fallback),
             _ => panic!("expected header-injection enable"),
         }
     }
@@ -404,6 +436,7 @@ mod tests {
             HeaderInjectionCommand::Enable {
                 channel: "trae".to_string(),
                 header: None,
+                fallback: false,
             },
         )
         .expect("enable");
@@ -424,6 +457,7 @@ mod tests {
             HeaderInjectionCommand::Enable {
                 channel: "trae".to_string(),
                 header: Some("X-Opencode-Session".to_string()),
+                fallback: false,
             },
         )
         .expect("update");
@@ -439,6 +473,47 @@ mod tests {
     }
 
     #[test]
+    fn header_injection_enable_with_fallback_sets_and_disable_keeps_it() {
+        let mut config = token_proxy_config::ProxyConfigFile::default();
+        mutate_header_injection(
+            &mut config,
+            HeaderInjectionCommand::Enable {
+                channel: "trae".to_string(),
+                header: None,
+                fallback: true,
+            },
+        )
+        .expect("enable");
+        assert!(
+            config
+                .header_injection
+                .as_ref()
+                .expect("section")
+                .channels
+                .get("trae")
+                .expect("channel")
+                .fallback_enabled
+        );
+
+        mutate_header_injection(
+            &mut config,
+            HeaderInjectionCommand::Disable {
+                channel: "trae".to_string(),
+            },
+        )
+        .expect("disable");
+        let channel = config
+            .header_injection
+            .as_ref()
+            .expect("section")
+            .channels
+            .get("trae")
+            .expect("channel kept");
+        assert!(!channel.enabled);
+        assert!(channel.fallback_enabled);
+    }
+
+    #[test]
     fn header_injection_disable_keeps_record() {
         let mut config = token_proxy_config::ProxyConfigFile::default();
         mutate_header_injection(
@@ -446,6 +521,7 @@ mod tests {
             HeaderInjectionCommand::Enable {
                 channel: "trae".to_string(),
                 header: Some("X-Opencode-Session".to_string()),
+                fallback: false,
             },
         )
         .expect("enable");
@@ -493,6 +569,7 @@ mod tests {
             HeaderInjectionCommand::Enable {
                 channel: "trae".to_string(),
                 header: Some("bad header".to_string()),
+                fallback: false,
             },
         )
         .expect_err("invalid header");
@@ -508,6 +585,7 @@ mod tests {
             HeaderInjectionCommand::Enable {
                 channel: "trae".to_string(),
                 header: None,
+                fallback: false,
             },
         )
         .expect("enable");

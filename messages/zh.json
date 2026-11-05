@@ -745,8 +745,9 @@
   "upstreams_section_header_injection": "请求头注入",
   "upstreams_header_injection_enable": "启用请求头注入",
   "upstreams_header_injection_target": "目标 Header",
-  "upstreams_header_injection_tip": "从最新用户消息的会话标记中提取 ID 并写入目标 Header；未检测到标记时原样透传。",
+  "upstreams_header_injection_tip": "从最新用户消息的会话标记中提取 ID 并写入目标 Header；未检测到标记时按回退开关处理。",
   "upstreams_header_injection_option_session": "X-Session-ID（通用兼容）",
   "upstreams_header_injection_option_opencode": "X-Opencode-Session（OpenCode Go）",
-  "upstreams_header_injection_hint": "默认 X-Session-ID；接入 OpenCode Go 时选择 X-Opencode-Session。"
+  "upstreams_header_injection_fallback_tip": "注入回退",
+  "upstreams_header_injection_hint": "默认 X-Session-ID；接入 OpenCode Go 时选择 X-Opencode-Session。回退关闭时未检测到标记原样透传；开启回退后无会话头时生成并绑定会话 ID。"
 }

@@ -753,6 +753,31 @@ describe("config/form header_injection", () => {
     expect(payload.header_injection).toEqual(config.header_injection);
   });
 
+  it("round-trips fallback_enabled", () => {
+    const config = {
+      ...toPayload({ ...EMPTY_FORM, upstreams: [] }),
+      header_injection: {
+        version: 1,
+        channels: {
+          trae: {
+            enabled: true,
+            fallback_enabled: true,
+            rules: [
+              {
+                id: "session-id",
+                enabled: true,
+                source: "hook_session_marker",
+                target_header: "X-Session-ID",
+              },
+            ],
+          },
+        },
+      },
+    };
+    const payload = toPayload(toForm(config));
+    expect(payload.header_injection?.channels?.trae.fallback_enabled).toBe(true);
+  });
+
   it("keeps a disabled record after the switch is turned off", () => {
     const config = {
       ...toPayload({ ...EMPTY_FORM, upstreams: [] }),

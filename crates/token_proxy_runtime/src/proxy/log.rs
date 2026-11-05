@@ -28,6 +28,10 @@ impl Default for ClientRequestBilling {
 }
 
 impl ClientRequestBilling {
+    pub(crate) fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
     fn complete_attempt(&self) -> BillingAttempt {
         BillingAttempt {
             request_id: self.request_id.to_string(),
@@ -308,6 +312,17 @@ mod tests {
             timings,
             start: Instant::now() - Duration::from_millis(300),
         }
+    }
+
+    #[test]
+    fn billing_request_id_is_stable_across_clones_and_distinct_per_request() {
+        let billing = ClientRequestBilling::default();
+        let cloned = billing.clone();
+        assert_eq!(billing.request_id(), cloned.request_id());
+        assert_eq!(billing.request_id().len(), 32);
+
+        let other = ClientRequestBilling::default();
+        assert_ne!(billing.request_id(), other.request_id());
     }
 
     #[test]

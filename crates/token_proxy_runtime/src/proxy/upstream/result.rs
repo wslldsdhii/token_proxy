@@ -15,6 +15,7 @@ use crate::proxy::log::{
 };
 use crate::proxy::openai_compat::FormatTransform;
 use crate::proxy::request_detail::RequestDetailSnapshot;
+use crate::proxy::session_fallback::SessionFallbackCapture;
 use crate::proxy::response::{
     build_proxy_response, build_proxy_response_buffered, AccountCooldownHint,
     NonRetryableSemanticResponse, RetryableStreamResponse,
@@ -109,6 +110,7 @@ pub(super) async fn handle_upstream_result(
     response_transform: FormatTransform,
     xai_client_tools: Option<XaiClientToolMapping>,
     request_detail: Option<RequestDetailSnapshot>,
+    fallback_capture: Option<SessionFallbackCapture>,
     cooldown_scope: &CooldownScope,
 ) -> AttemptOutcome {
     let account_id_value = account_id.as_deref().map(str::to_string);
@@ -133,6 +135,7 @@ pub(super) async fn handle_upstream_result(
                 response_transform,
                 xai_client_tools.clone(),
                 request_detail.clone(),
+                fallback_capture.clone(),
                 state.config.sync_response_timeout,
             )
             .await;
@@ -207,6 +210,7 @@ pub(super) async fn handle_upstream_result(
                 response_transform,
                 xai_client_tools,
                 request_detail.clone(),
+                fallback_capture,
                 state.config.stream_first_output_timeout,
                 state.config.sync_response_timeout,
             )

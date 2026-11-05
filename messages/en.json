@@ -745,8 +745,9 @@
   "upstreams_section_header_injection": "Header injection",
   "upstreams_header_injection_enable": "Enable header injection",
   "upstreams_header_injection_target": "Target header",
-  "upstreams_header_injection_tip": "Extracts the session id from the latest user message marker and sets it on the target header; passes through unchanged when no marker is found.",
+  "upstreams_header_injection_tip": "Extracts the session id from the latest user message marker and sets it on the target header; when no marker is found the fallback switch decides what happens.",
   "upstreams_header_injection_option_session": "X-Session-ID (general)",
   "upstreams_header_injection_option_opencode": "X-Opencode-Session (OpenCode Go)",
-  "upstreams_header_injection_hint": "Default X-Session-ID. Choose X-Opencode-Session when the channel points at OpenCode Go."
+  "upstreams_header_injection_fallback_tip": "Injection fallback",
+  "upstreams_header_injection_hint": "Default X-Session-ID. Choose X-Opencode-Session when the channel points at OpenCode Go. With fallback off, requests without a marker pass through unchanged; with fallback on, a session id is generated and bound when neither session header is present."
 }

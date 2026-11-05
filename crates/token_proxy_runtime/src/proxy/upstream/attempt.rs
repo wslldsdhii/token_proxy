@@ -218,6 +218,7 @@ async fn inspect_request_repair(
         timings,
         token_tracker,
         xai_client_tools,
+        fallback_capture,
         skip_same_upstream_retry,
     } = attempt;
     let status = response.status();
@@ -274,6 +275,7 @@ async fn inspect_request_repair(
             timings,
             token_tracker,
             xai_client_tools,
+            fallback_capture,
             skip_same_upstream_retry,
         },
         repair,
@@ -357,6 +359,7 @@ pub(super) async fn attempt_send(
         selected_account_id,
         codex_openai_device_id,
         meta,
+        fallback_capture,
     } = prepared;
     // 在真正发上游前 register，TTFB 期间托盘也能显示 connections（↑ fallback）。
     let token_tracker = register_token_tracker_for_attempt(state, &meta).await;
@@ -401,6 +404,7 @@ pub(super) async fn attempt_send(
         timings,
         token_tracker,
         xai_client_tools,
+        fallback_capture,
         skip_same_upstream_retry: false,
     })
 }

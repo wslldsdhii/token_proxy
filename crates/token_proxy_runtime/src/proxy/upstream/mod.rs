@@ -169,6 +169,8 @@ pub(super) struct PreparedUpstreamRequest {
     selected_account_id: Option<String>,
     codex_openai_device_id: Option<String>,
     meta: RequestMeta,
+    /// 首轮回退 ID 的响应侧提交句柄；非回退请求为 None。
+    pub(super) fallback_capture: Option<crate::proxy::session_fallback::SessionFallbackCapture>,
 }
 
 struct ResolvedUpstreamAuth {

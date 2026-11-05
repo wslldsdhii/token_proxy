@@ -94,7 +94,13 @@ pub(super) async fn prepare_upstream_request_with_body(
         upstream.header_overrides.as_deref(),
     );
     // ══════════ HEADER-INJECTION PATCH 7 (apply) START ══════════
-    super::super::header_injection::apply(upstream, body, &mut request_headers);
+    let fallback_capture = super::super::header_injection::apply(
+        Some(state.session_fallback.as_ref()),
+        upstream,
+        body,
+        &mut request_headers,
+        mapped_meta.billing.request_id(),
+    );
     // ══════════ HEADER-INJECTION PATCH 7 (apply) END ══════════
     if provider == "xai" {
         enforce_xai_request_headers(
@@ -126,6 +132,7 @@ pub(super) async fn prepare_upstream_request_with_body(
         selected_account_id,
         codex_openai_device_id,
         meta: mapped_meta,
+        fallback_capture,
     })
 }
 

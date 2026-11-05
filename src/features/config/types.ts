@@ -270,6 +270,7 @@ export type HeaderInjectionRuleConfig = {
 
 export type HeaderInjectionChannelConfig = {
   enabled?: boolean;
+  fallback_enabled?: boolean;
   rules?: HeaderInjectionRuleConfig[];
   [key: string]: unknown;
 };
@@ -280,9 +281,10 @@ export type HeaderInjectionSectionConfig = {
   [key: string]: unknown;
 };
 
-/** 渠道编辑器内的草稿态（只暴露 UI 编辑的两项）。 */
+/** 渠道编辑器内的草稿态（只暴露 UI 编辑的三项）。 */
 export type HeaderInjectionChannelDraft = {
   enabled: boolean;
+  fallbackEnabled: boolean;
   targetHeader: string;
 };
 /** ═══ HEADER-INJECTION PATCH G1 END ═══ */

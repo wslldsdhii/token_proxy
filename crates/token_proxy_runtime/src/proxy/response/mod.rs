@@ -9,6 +9,7 @@ use url::Url;
 
 use super::{
     http,
+    session_fallback::SessionFallbackCapture,
     log::{LogContext, LogWriter, RequestTimings},
     openai,
     openai_compat::FormatTransform,
@@ -119,6 +120,7 @@ pub(super) async fn build_proxy_response(
     response_transform: FormatTransform,
     xai_client_tools: Option<XaiClientToolMapping>,
     request_detail: Option<RequestDetailSnapshot>,
+    fallback_capture: Option<SessionFallbackCapture>,
     stream_first_output_timeout: Duration,
     sync_response_timeout: Duration,
 ) -> Response {
@@ -172,6 +174,7 @@ pub(super) async fn build_proxy_response(
             request_tracker,
             response_transform,
             xai_client_tools,
+            fallback_capture,
             model_override,
             meta.estimated_input_tokens,
             meta.response_format.as_deref(),
@@ -190,6 +193,7 @@ pub(super) async fn build_proxy_response(
             request_tracker,
             response_transform,
             xai_client_tools,
+            fallback_capture,
             model_override,
             meta.estimated_input_tokens,
             meta.response_format.as_deref(),
@@ -215,6 +219,7 @@ pub(super) async fn build_proxy_response_buffered(
     response_transform: FormatTransform,
     xai_client_tools: Option<XaiClientToolMapping>,
     request_detail: Option<RequestDetailSnapshot>,
+    fallback_capture: Option<SessionFallbackCapture>,
     sync_response_timeout: Duration,
 ) -> Response {
     let sync_response_timeout = response_no_data_timeout(inbound_path, sync_response_timeout);
@@ -260,6 +265,7 @@ pub(super) async fn build_proxy_response_buffered(
         request_tracker,
         response_transform,
         xai_client_tools,
+        fallback_capture,
         model_override,
         meta.estimated_input_tokens,
         meta.response_format.as_deref(),

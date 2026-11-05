@@ -1966,6 +1966,16 @@ async fn build_test_state_handle(config: ProxyConfig, data_dir: PathBuf) -> Prox
     build_test_state_handle_with_paths(config, paths, None).await
 }
 
+#[tokio::test]
+async fn session_fallback_file_lives_in_data_dir() {
+    let data_dir = next_test_data_dir("session_fallback_path");
+    let expected = data_dir.join(crate::proxy::session_fallback::FALLBACK_FILE_NAME);
+    let config = config_with_providers(&[("openai", FORMATS_CHAT)]);
+    let state = build_test_state_handle(config, data_dir).await;
+    let state = state.read().await;
+    assert_eq!(state.session_fallback.file_path(), expected);
+}
+
 async fn build_test_state_handle_with_sqlite_log(
     config: ProxyConfig,
     data_dir: PathBuf,
@@ -2092,6 +2102,9 @@ async fn build_test_state_handle_with_paths(
         codex_accounts,
         codex_turn_state: super::super::codex_turn_state::CodexTurnStateProvenance::new(),
         xai_accounts,
+        session_fallback: super::super::session_fallback::SessionFallbackStore::new(
+            paths.data_dir(),
+        ),
     });
     Arc::new(RwLock::new(state))
 }

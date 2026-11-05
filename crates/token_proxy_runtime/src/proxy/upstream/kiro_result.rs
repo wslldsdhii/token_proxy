@@ -90,6 +90,7 @@ pub(super) async fn finalize_response(
             response_transform,
             None,
             request_detail,
+            None,
             state.config.stream_first_output_timeout,
             state.config.sync_response_timeout,
         )
@@ -112,6 +113,7 @@ pub(super) async fn finalize_response(
         response_transform,
         None,
         request_detail,
+        None,
         &crate::proxy::cooldown_scope::CooldownScope::Global,
     )
     .await

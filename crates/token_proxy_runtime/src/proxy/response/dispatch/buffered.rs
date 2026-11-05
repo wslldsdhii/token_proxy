@@ -24,6 +24,7 @@ use super::super::super::{
     request_body::ReplayableBody,
     server_helpers::log_debug_headers_body,
     sse::SseEventParser,
+    session_fallback::{self, SessionFallbackCapture},
     token_rate::RequestTokenTracker,
     usage::extract_usage_from_response,
 };
@@ -48,6 +49,7 @@ pub(super) async fn build_buffered_response(
     request_tracker: RequestTokenTracker,
     response_transform: FormatTransform,
     xai_client_tools: Option<token_proxy_protocol::xai_client_tools::XaiClientToolMapping>,
+    fallback_capture: Option<SessionFallbackCapture>,
     model_override: Option<&str>,
     estimated_input_tokens: Option<u64>,
     response_format: Option<&str>,
@@ -61,6 +63,41 @@ pub(super) async fn build_buffered_response(
             Ok(bytes) => bytes,
             Err(response) => return response,
         };
+    if let Some(capture) = fallback_capture {
+        if status.is_success()
+            && response_transform == FormatTransform::None
+            && context.provider == "openai"
+            && super::stream::is_chat_completions_path(&context.path)
+        {
+            match serde_json::from_slice::<Value>(&bytes) {
+                Ok(value) => {
+                    if let Some(canonical) =
+                        session_fallback::extract::canonical_assistant_from_json_response(&value)
+                    {
+                        capture.commit(&session_fallback::extract::assistant_hash(&canonical));
+                    } else {
+                        tracing::debug!(
+                            upstream_id = %context.upstream_id,
+                            "session fallback: no assistant content in buffered response"
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        upstream_id = %context.upstream_id,
+                        %error,
+                        "session fallback: buffered response is not JSON; binding deferred"
+                    );
+                }
+            }
+        } else {
+            tracing::warn!(
+                provider = %context.provider,
+                path = %context.path,
+                "session fallback buffered capture skipped: unsupported protocol or transform"
+            );
+        }
+    }
     log_debug_headers_body(
         "upstream.response.raw",
         Some(&response_headers),

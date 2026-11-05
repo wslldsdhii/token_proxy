@@ -129,6 +129,7 @@ pub(super) async fn handle_send_error(
                 response_transform,
                 None,
                 request_detail,
+                None,
                 &crate::proxy::cooldown_scope::CooldownScope::Global,
             )
             .await

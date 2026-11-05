@@ -3,7 +3,7 @@
 对齐 `my_proxy_endpoint/MY-PROXY-ENDPOINT-PATCHES.md` 与 `rate_recorder/RATE-RECORDER-PATCHES.md` 的恢复惯例。
 官方 main 不含本模块；每次 `git pull` 官方后需：检出 5 个自有目录/文件 → 重放 11 组 PATCH（config 9 处、runtime 2 处、CLI 5 处横幅、前端 10 处）→ 重放 i18n key 块 → 验证。
 
-功能 = **5 个纯新增文件 + 11 组横幅注入（9 个上游文件）+ 2 组 i18n 文案块 + 3 处 GUI 操作优化**。
+功能 = **5 个纯新增文件 + 11 组横幅注入（9 个上游文件）+ 2 组 i18n 文案块 + 3 处 GUI 操作优化 + 注入回退（`session_fallback`）**。
 
 ## 文件清单（纯新增，零上游冲突）
 
@@ -152,7 +152,13 @@ mod header_injection;
 
 ```rust
     // ══════════ HEADER-INJECTION PATCH 7 (apply) START ══════════
-    super::super::header_injection::apply(upstream, body, &mut request_headers);
+    let fallback_capture = super::super::header_injection::apply(
+        Some(state.session_fallback.as_ref()),
+        upstream,
+        body,
+        &mut request_headers,
+        mapped_meta.billing.request_id(),
+    );
     // ══════════ HEADER-INJECTION PATCH 7 (apply) END ══════════
 ```
 
@@ -179,7 +185,11 @@ mod header_injection;
 #[derive(Subcommand)]
 enum HeaderInjectionCommand {
     List,
-    Enable { #[arg(long)] channel: String, #[arg(long)] header: Option<String> },
+    Enable {
+        #[arg(long)] channel: String,
+        #[arg(long)] header: Option<String>,
+        #[arg(long)] fallback: bool,
+    },
     Disable { #[arg(long)] channel: String },
 }
 // ══════════ HEADER-INJECTION PATCH 8 (cli subcommands) END ══════════
@@ -262,6 +272,7 @@ upstreams_header_injection_target
 upstreams_header_injection_tip
 upstreams_header_injection_option_session
 upstreams_header_injection_option_opencode
+upstreams_header_injection_fallback_tip
 upstreams_header_injection_hint
 ```
 
@@ -280,10 +291,74 @@ my_proxy_endpoint_no_suffix          → 删除（不再引用）
 2. `src/features/my-model-mapping-panel/ModelMappingPanel.tsx`：标题行改单一 `<button>`；`sortableHeader` 与 `providers` 表头改「满格按钮 + 绝对定位拖拽手柄」（文件属自建 `my-model-mapping-panel`，无横幅）。
 3. `src/features/config/cards/upstreams/available-models-editor.tsx`（官方文件）：`ScrollArea` 高度 `h-40` → `h-[28rem]` 并补 `data-testid`，横幅 `PATCH G9 (list height)`。
 
+## 八、注入回退（session_fallback）
+
+### 纯新增文件
+
+| 路径 | 内容 |
+| --- | --- |
+| `crates/token_proxy_runtime/src/proxy/session_fallback/mod.rs` | `SessionFallbackStore`、pending、内存 LRU（50）、JSON 映射、30s debounce、1h 清理、`resolve`/`commit` |
+| `crates/token_proxy_runtime/src/proxy/session_fallback/extract.rs` | 首条 user/assistant 提取、文本/`tool_calls` 规范化、两段式哈希 |
+| `crates/token_proxy_runtime/src/proxy/session_fallback/stream.rs` | SSE 只读旁路 `wrap_stream` + `AssistantAccumulator` |
+| `crates/token_proxy_runtime/src/proxy/session_fallback/mod.test.rs` | 哈希、LRU、TTL、文件、流式字节一致性单测 |
+
+### 官方文件注入点
+
+| 文件 | 注入内容 |
+| --- | --- |
+| `src/proxy/mod.rs` | `mod session_fallback;`（横幅 `HEADER-INJECTION FALLBACK PATCH 1`）；`ProxyState.session_fallback`（PATCH 2） |
+| `src/proxy/service/mod.rs` | `build_proxy_state` 用 `ctx.paths.data_dir()` 创建 store（PATCH 3） |
+| `src/proxy/log.rs` | `ClientRequestBilling::request_id()` 访问器 |
+| `src/proxy/upstream/mod.rs` | `PreparedUpstreamRequest.fallback_capture` |
+| `src/proxy/upstream/attempt.rs` | 解构 capture 并放入 `UpstreamAttempt` |
+| `src/proxy/upstream/retry.rs` | `UpstreamAttempt.fallback_capture`，重试/恢复路径透传 |
+| `src/proxy/upstream/result.rs` | `handle_upstream_result` 增加 capture 参数；两处 `build_proxy_response(_buffered)` 透传 |
+| `src/proxy/upstream/kiro_result.rs`、`kiro_http.rs` | 非 OpenAI 调用点传 `None` |
+| `src/proxy/response/mod.rs` | `build_proxy_response(_buffered)` 增加 capture 参数 |
+| `src/proxy/response/dispatch/mod.rs` | 两个分发包装函数透传 capture |
+| `src/proxy/response/dispatch/stream.rs` | OpenAI chat + `response_transform=None` 时用 `session_fallback::stream::wrap_stream` 旁路 |
+| `src/proxy/response/dispatch/buffered.rs` | 成功 OpenAI chat JSON 解析 `choices[0].message` 并 `commit` |
+| `src/features/config/types.ts` | `fallback_enabled?` + 草稿 `fallbackEnabled`（G1） |
+| `src/features/config/header-injection.ts` | `readChannelDraft`/`applyChannelDraft` 读写回退开关（G2） |
+| `.../upstreams/editor-dialog-form.tsx` | 目标 Header 右侧无文字 `Checkbox` + Tooltip「注入回退」（G6） |
+| `messages/zh.json`、`messages/en.json` | `upstreams_header_injection_fallback_tip` + hint 文案 |
+
+> `fallback_enabled` 缺省 `false`；`skip_serializing_if` 保证 false 不写出。回退映射文件独立于 `config.jsonc`。
+
+### 数据文件
+
+`{data_dir}/header_injection_fallback.json`
+
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "upstream_id": "trae-opencode",
+      "hash": "<64 hex>",
+      "id": "<32 hex>",
+      "created_at": 1793836800000,
+      "last_used_at": 1793836800000
+    }
+  ]
+}
+```
+
+### 恢复顺序
+
+1. 新增 `session_fallback/` 四个文件。
+2. 重放 `proxy/mod.rs`（PATCH 1/2）与 `service/mod.rs`（PATCH 3）横幅。
+3. 重放 `log.rs` 的 `request_id` 访问器。
+4. 重放 `upstream/mod.rs` → `attempt.rs` → `retry.rs` → `result.rs` → `kiro_*` 的 capture 透传。
+5. 重放 `response/mod.rs` → `dispatch/mod.rs` → `stream.rs`/`buffered.rs` 的采集分支。
+6. 重放 `header_injection/mod.rs` 的 `apply` 回退分支，以及 config/CLI/GUI/i18n 的 `fallback_enabled` 字段。
+7. 按验证清单跑 `session_fallback`、`header_injection`、`cli`、workspace 与前端测试。
+
 ## 验证清单
 
 ```bash
 cargo test -p token_proxy_config header_injection
+cargo test -p token_proxy_runtime session_fallback
 cargo test -p token_proxy_runtime header_injection
 cargo test -p token_proxy_cli
 cargo test --workspace

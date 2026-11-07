@@ -742,6 +742,7 @@
   "my_model_mapping_panel_empty": "No channel has model mappings",
   "my_model_mapping_panel_empty_filtered": "No matching rows",
   "my_model_mapping_panel_only_enabled": "Enabled only",
+  "my_model_mapping_panel_copy_provider": "Copy provider too",
   "upstreams_section_header_injection": "Header injection",
   "upstreams_header_injection_enable": "Enable header injection",
   "upstreams_header_injection_target": "Target header",

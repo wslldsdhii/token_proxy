@@ -8,14 +8,19 @@ import { m } from "@/paraglide/messages.js";
 import { ModelMappingPanel } from "./ModelMappingPanel";
 import type { MappingPanelData } from "./types";
 
-const { readMock, persistMock } = vi.hoisted(() => ({
+const { readMock, persistMock, writeTextMock } = vi.hoisted(() => ({
   readMock: vi.fn(),
   persistMock: vi.fn(),
+  writeTextMock: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
   readMappingPanelData: readMock,
   persistMappingPanelColumns: persistMock,
+}));
+
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  writeText: writeTextMock,
 }));
 
 function panelData(overrides: Partial<MappingPanelData> = {}): MappingPanelData {
@@ -58,6 +63,7 @@ describe("my-model-mapping-panel", () => {
     vi.clearAllMocks();
     readMock.mockResolvedValue(panelData());
     persistMock.mockResolvedValue(undefined);
+    writeTextMock.mockResolvedValue(undefined);
   });
   afterEach(cleanup);
 
@@ -148,6 +154,27 @@ describe("my-model-mapping-panel", () => {
     await userEvent.click(checkbox);
     // 取消勾选后显示全部
     await waitFor(() => expect(screen.getByText("p2")).toBeTruthy());
+  });
+
+  it("「同时复制提供商」默认勾选复制渠道/映射名；取消后只复制映射名", async () => {
+    renderPanel();
+    await expand();
+    await screen.findByText("glm5");
+
+    const label = screen.getByTestId("mapping-copy-provider");
+    const checkbox = label.querySelector("button[role=checkbox]") as HTMLElement;
+    expect(checkbox.getAttribute("data-state")).toBe("checked");
+
+    await userEvent.click(screen.getAllByTestId("mapping-cell-alias")[0]);
+    await waitFor(() => expect(writeTextMock).toHaveBeenCalledWith("glm-proxy/glm5"));
+
+    await userEvent.click(screen.getByTestId("mapping-copy-0"));
+    await waitFor(() => expect(writeTextMock).toHaveBeenLastCalledWith("glm-proxy/glm5"));
+
+    await userEvent.click(checkbox);
+    expect(checkbox.getAttribute("data-state")).toBe("unchecked");
+    await userEvent.click(screen.getAllByTestId("mapping-cell-alias")[0]);
+    await waitFor(() => expect(writeTextMock).toHaveBeenLastCalledWith("glm5"));
   });
 
   it("持久化的隐藏列在加载后生效（target 列不渲染）", async () => {

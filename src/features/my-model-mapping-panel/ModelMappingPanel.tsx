@@ -34,7 +34,13 @@ import {
   normalizeHiddenColumns,
   sortRows,
 } from "./logic";
-import type { HidableColumnId, MappingPanelData, SortDirection, SortableColumnId } from "./types";
+import type {
+  HidableColumnId,
+  MappingPanelData,
+  MappingRow,
+  SortDirection,
+  SortableColumnId,
+} from "./types";
 
 /**
  * 展开体固定高度：默认窗口（1064×658）扣除接入地址栏 / 折叠头 / 边距后的
@@ -58,6 +64,7 @@ export function ModelMappingPanel() {
   const [search, setSearch] = useState("");
   const [selectedUpstreams, setSelectedUpstreams] = useState<string[]>([]);
   const [onlyEnabled, setOnlyEnabled] = useState(true);
+  const [copyProvider, setCopyProvider] = useState(true);
   const [upstreamMenuSearch, setUpstreamMenuSearch] = useState("");
   const [sortColumn, setSortColumn] = useState<SortableColumnId | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -136,6 +143,9 @@ export function ModelMappingPanel() {
     }
   }, []);
 
+  const modelCopyText = (row: MappingRow) =>
+    copyProvider ? `${row.upstream}/${row.alias}` : row.alias;
+
   const clearFilters = () => {
     setSearch("");
     setSelectedUpstreams([]);
@@ -202,7 +212,12 @@ export function ModelMappingPanel() {
     </th>
   );
 
-  const copyableCell = (column: string, text: string, className?: string) => (
+  const copyableCell = (
+    column: string,
+    text: string,
+    className?: string,
+    copyValue: string = text
+  ) => (
     <td
       className={cn(
         "cursor-pointer px-3 py-2 align-middle text-xs",
@@ -211,7 +226,7 @@ export function ModelMappingPanel() {
       )}
       style={{ width: widthOf(column) }}
       title={text}
-      onClick={() => void copyText(text)}
+      onClick={() => void copyText(copyValue)}
       data-testid={`mapping-cell-${column}`}
     >
       <span className="block truncate">{text}</span>
@@ -274,6 +289,17 @@ export function ModelMappingPanel() {
                           aria-label={m.my_model_mapping_panel_only_enabled()}
                         />
                         {m.my_model_mapping_panel_only_enabled()}
+                      </label>
+                      <label
+                        className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground"
+                        data-testid="mapping-copy-provider"
+                      >
+                        <Checkbox
+                          checked={copyProvider}
+                          onCheckedChange={(checked) => setCopyProvider(checked === true)}
+                          aria-label={m.my_model_mapping_panel_copy_provider()}
+                        />
+                        {m.my_model_mapping_panel_copy_provider()}
                       </label>
                       <div className="relative min-w-0 flex-1 sm:max-w-xs">
                         <Search
@@ -462,7 +488,13 @@ export function ModelMappingPanel() {
                                 <td className="px-2 py-2 text-center align-middle text-xs text-muted-foreground tabular-nums">
                                   {index + 1}
                                 </td>
-                                {!isHidden("alias") && copyableCell("alias", row.alias, "font-medium text-foreground")}
+                                {!isHidden("alias") &&
+                                  copyableCell(
+                                    "alias",
+                                    row.alias,
+                                    "font-medium text-foreground",
+                                    modelCopyText(row)
+                                  )}
                                 {!isHidden("upstream") && copyableCell("upstream", row.upstream)}
                                 {!isHidden("target") && copyableCell("target", row.target)}
                                 {!isHidden("providers") && (
@@ -488,7 +520,7 @@ export function ModelMappingPanel() {
                                     variant="ghost"
                                     size="sm"
                                     className="size-6 p-0"
-                                    onClick={() => void copyText(row.alias)}
+                                    onClick={() => void copyText(modelCopyText(row))}
                                     aria-label={m.my_model_mapping_panel_col_copy()}
                                     data-testid={`mapping-copy-${index}`}
                                   >

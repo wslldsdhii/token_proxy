@@ -742,6 +742,7 @@
   "my_model_mapping_panel_empty": "没有渠道配置模型映射",
   "my_model_mapping_panel_empty_filtered": "无匹配结果",
   "my_model_mapping_panel_only_enabled": "仅启用",
+  "my_model_mapping_panel_copy_provider": "同时复制提供商",
   "upstreams_section_header_injection": "请求头注入",
   "upstreams_header_injection_enable": "启用请求头注入",
   "upstreams_header_injection_target": "目标 Header",

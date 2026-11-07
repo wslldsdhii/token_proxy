@@ -129,17 +129,32 @@ export type UrlComposeEndpoint = {
   // ══════════ MY-STRIP-VERSION PATCH 5 (types) END ══════════
 };
 
+/** 单接口家族：兼容旧单条 prefix/suffix 与严格模式多规则 routes。 */
+export type UrlComposeFamilyConfig = {
+  prefix?: string;
+  suffix?: string;
+  strip_version?: boolean;
+  /** 严格透传多规则；非空时优先于单条 prefix/suffix。 */
+  routes?: UrlComposeEndpoint[];
+};
+
 export type UrlComposeConfig = {
-  openai?: UrlComposeEndpoint;
-  "openai-response"?: UrlComposeEndpoint;
-  anthropic?: UrlComposeEndpoint;
+  /** 请求匹配协议透传：协议只由 URL 规则决定，不做协议转换。 */
+  strict_protocol_passthrough?: boolean;
+  openai?: UrlComposeFamilyConfig;
+  "openai-response"?: UrlComposeFamilyConfig;
+  anthropic?: UrlComposeFamilyConfig;
   // ══════════ MY-DASHSCOPE-PASSTHROUGH PATCH 3 (types) START ══════════
   /** DashScope 原生协议家族（/v1/services 前缀透传的出站组合）。 */
-  dashscope?: UrlComposeEndpoint;
+  dashscope?: UrlComposeFamilyConfig;
   // ══════════ MY-DASHSCOPE-PASSTHROUGH PATCH 3 (types) END ══════════
 };
 
-export type UrlComposeFamily = keyof UrlComposeConfig;
+export type UrlComposeFamily =
+  | "openai"
+  | "openai-response"
+  | "anthropic"
+  | "dashscope";
 /** ═══ MY-URL-COMPOSE PATCH G1 END ═══ */
 
 export type ProxyConfigFileBase = {

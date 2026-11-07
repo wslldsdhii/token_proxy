@@ -82,18 +82,42 @@ pub(super) async fn finalize_prepared_request(
     request_start: Instant,
 ) -> Result<PreparedRequest, Response> {
     let source_body = inbound.body.clone();
-    let outbound_path = resolve_outbound_path(&inbound.path, &inbound.plan, &inbound.meta)
+    let original_provider = inbound.plan.provider;
+    let plan = super::strict::apply_strict_plan(
+        &state.config,
+        &inbound.path,
+        &inbound.meta,
+        inbound.plan,
+    )
+    .map_err(|message| {
+        tracing::warn!(
+            provider = original_provider,
+            path = %inbound.path,
+            %message,
+            "strict protocol passthrough rejected request"
+        );
+        log_request_error(
+            &state.log,
+            inbound.request_detail.clone(),
+            inbound.client_ip.clone(),
+            &inbound.path,
+            original_provider,
+            LOCAL_UPSTREAM_ID,
+            StatusCode::BAD_REQUEST,
+            message.clone(),
+            request_start,
+        );
+        http::error_response(StatusCode::BAD_REQUEST, message)
+    })?;
+    let outbound_path = resolve_outbound_path(&inbound.path, &plan, &inbound.meta)
         .map_err(|message| {
-            tracing::warn!(
-                provider = inbound.plan.provider,
-                "rejected unsafe outbound path"
-            );
+            tracing::warn!(provider = plan.provider, "rejected unsafe outbound path");
             log_request_error(
                 &state.log,
                 None,
                 inbound.client_ip.clone(),
                 super::super::path_guard::REDACTED_INVALID_PATH,
-                inbound.plan.provider,
+                plan.provider,
                 LOCAL_UPSTREAM_ID,
                 StatusCode::BAD_REQUEST,
                 message.to_string(),
@@ -112,14 +136,14 @@ pub(super) async fn finalize_prepared_request(
         inbound.request_detail.clone(),
         inbound.client_ip.clone(),
         &inbound.path,
-        inbound.plan.provider,
+        plan.provider,
         request_start,
     )?;
     Ok(PreparedRequest {
         path: inbound.path,
         client_ip: inbound.client_ip,
         outbound_path_with_query,
-        plan: inbound.plan,
+        plan,
         meta: inbound.meta,
         client_gemini_api_key,
         request_detail: inbound.request_detail,

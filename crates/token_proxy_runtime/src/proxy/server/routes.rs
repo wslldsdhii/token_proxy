@@ -111,5 +111,6 @@ pub(super) fn plan_for_format(
         outbound_path,
         request_transform,
         response_transform,
+        strict_passthrough: false,
     })
 }

@@ -173,11 +173,14 @@ fn segment_normalization_rules() {
 fn config_normalized_deep_copies() {
     use crate::my_url_compose::UrlComposeConfig;
     let mut config = UrlComposeConfig::default();
-    config.anthropic = Some(EndpointCompose {
-        prefix: "anthropic/".to_string(),
-        suffix: " /v1/messages ".to_string(),
-        ..Default::default()
-    });
+    config.anthropic = Some(
+        EndpointCompose {
+            prefix: "anthropic/".to_string(),
+            suffix: " /v1/messages ".to_string(),
+            ..Default::default()
+        }
+        .into(),
+    );
     let normalized = config.normalized();
     let anthropic = normalized.anthropic.as_ref().unwrap();
     assert_eq!(anthropic.prefix, "/anthropic");
@@ -383,11 +386,14 @@ fn strip_applies_to_dashscope_family() {
 #[test]
 fn normalized_preserves_strip_version() {
     let mut config = crate::my_url_compose::UrlComposeConfig::default();
-    config.openai = Some(EndpointCompose {
-        prefix: String::new(),
-        suffix: "/v1/chat/completions".to_string(),
-        strip_version: true,
-    });
+    config.openai = Some(
+        EndpointCompose {
+            prefix: String::new(),
+            suffix: "/v1/chat/completions".to_string(),
+            strip_version: true,
+        }
+        .into(),
+    );
     let normalized = config.normalized();
     assert!(normalized.openai.as_ref().unwrap().strip_version);
 }

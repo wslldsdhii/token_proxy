@@ -9690,6 +9690,7 @@ fn gemini_outbound_path_rejects_mapped_model_path_injection() {
         outbound_path: None,
         request_transform: FormatTransform::ResponsesToGemini,
         response_transform: FormatTransform::GeminiToResponses,
+        strict_passthrough: false,
     };
     let meta = RequestMeta {
         client_ip: None,
@@ -11261,3 +11262,316 @@ fn dashscope_unknown_path_stays_in_formatless_candidates() {
     assert_eq!(plan.provider, PROVIDER_CHAT);
 }
 // ══════════ MY-DASHSCOPE-PASSTHROUGH PATCH 1 (test) END ══════════
+
+// ══════════ STRICT-PROTOCOL-PASSTHROUGH TESTS START ══════════
+fn strict_request_meta(model: &str) -> RequestMeta {
+    RequestMeta {
+        client_ip: None,
+        stream: false,
+        original_model: Some(model.to_string()),
+        mapped_model: None,
+        reasoning_effort: None,
+        response_format: None,
+        estimated_input_tokens: None,
+        billing: Default::default(),
+    }
+}
+
+fn config_with_strict_channel(
+    routes: &[(&str, &str, &str)],
+) -> ProxyConfig {
+    let mut config = config_with_upstreams(&[(
+        "openai",
+        0,
+        "strict-channel",
+        &[InboundApiFormat::OpenaiChat],
+    )]);
+    let mut compose = token_proxy_config::my_url_compose::UrlComposeConfig {
+        strict_protocol_passthrough: true,
+        ..Default::default()
+    };
+    let mut by_family: HashMap<&str, Vec<token_proxy_config::my_url_compose::EndpointCompose>> =
+        HashMap::new();
+    for (family, prefix, suffix) in routes {
+        by_family.entry(*family).or_default().push(
+            token_proxy_config::my_url_compose::EndpointCompose {
+                prefix: (*prefix).to_string(),
+                suffix: (*suffix).to_string(),
+                strip_version: false,
+            },
+        );
+    }
+    for (family, routes) in by_family {
+        let family_compose = token_proxy_config::my_url_compose::FamilyCompose {
+            routes,
+            ..Default::default()
+        };
+        match family {
+            "openai" => compose.openai = Some(family_compose),
+            "openai-response" => compose.openai_response = Some(family_compose),
+            "anthropic" => compose.anthropic = Some(family_compose),
+            "dashscope" => compose.dashscope = Some(family_compose),
+            _ => {}
+        }
+    }
+    for upstreams in config.upstreams.values_mut() {
+        for group in &mut upstreams.groups {
+            for upstream in &mut group.items {
+                if upstream.id == "strict-channel" {
+                    upstream.url_compose = compose.clone();
+                }
+            }
+        }
+    }
+    config
+}
+
+fn base_chat_plan() -> DispatchPlan {
+    DispatchPlan {
+        provider: PROVIDER_CHAT,
+        outbound_path: None,
+        request_transform: FormatTransform::None,
+        response_transform: FormatTransform::None,
+        strict_passthrough: false,
+    }
+}
+
+#[test]
+fn strict_plan_locks_chat_to_openai() {
+    let config = config_with_strict_channel(&[
+        ("openai", "/compatible-mode", "/v1/chat/completions"),
+        ("openai", "/compatible-mode", "/v1/embedding"),
+        ("openai-response", "/compatible-mode", "/v1/responses"),
+    ]);
+    let plan = super::strict::apply_strict_plan(
+        &config,
+        "/v1/chat/completions",
+        &strict_request_meta("strict-channel/model-a"),
+        base_chat_plan(),
+    )
+    .expect("strict plan");
+    assert_eq!(plan.provider, PROVIDER_CHAT);
+    assert!(plan.strict_passthrough);
+    assert_eq!(plan.request_transform, FormatTransform::None);
+    assert_eq!(plan.response_transform, FormatTransform::None);
+}
+
+#[test]
+fn strict_plan_routes_embedding_to_openai_not_responses() {
+    let config = config_with_strict_channel(&[
+        ("openai", "/compatible-mode", "/v1/chat/completions"),
+        ("openai", "/compatible-mode", "/v1/embedding"),
+        ("openai-response", "/compatible-mode", "/v1/responses"),
+    ]);
+    let plan = super::strict::apply_strict_plan(
+        &config,
+        "/v1/embedding",
+        &strict_request_meta("strict-channel/model-a"),
+        base_chat_plan(),
+    )
+    .expect("strict plan");
+    assert_eq!(plan.provider, PROVIDER_CHAT);
+    assert!(plan.strict_passthrough);
+}
+
+#[test]
+fn strict_plan_locks_responses_to_responses() {
+    let config = config_with_strict_channel(&[
+        ("openai", "/compatible-mode", "/v1/chat/completions"),
+        ("openai-response", "/compatible-mode", "/v1/responses"),
+    ]);
+    let plan = super::strict::apply_strict_plan(
+        &config,
+        "/v1/responses",
+        &strict_request_meta("strict-channel/model-a"),
+        base_chat_plan(),
+    )
+    .expect("strict plan");
+    assert_eq!(plan.provider, PROVIDER_RESPONSES);
+    assert!(plan.strict_passthrough);
+}
+
+#[test]
+fn strict_plan_rejects_unmatched_path() {
+    let config = config_with_strict_channel(&[(
+        "openai",
+        "/compatible-mode",
+        "/v1/chat/completions",
+    )]);
+    let error = super::strict::apply_strict_plan(
+        &config,
+        "/v1/unknown-endpoint",
+        &strict_request_meta("strict-channel/model-a"),
+        base_chat_plan(),
+    )
+    .expect_err("unmatched");
+    assert!(error.contains("no url_compose route matches"));
+}
+
+#[test]
+fn strict_plan_exempts_models_path() {
+    let config = config_with_strict_channel(&[(
+        "openai",
+        "/compatible-mode",
+        "/v1/chat/completions",
+    )]);
+    let plan = super::strict::apply_strict_plan(
+        &config,
+        "/v1/models",
+        &strict_request_meta("strict-channel/model-a"),
+        base_chat_plan(),
+    )
+    .expect("models exempt");
+    assert!(!plan.strict_passthrough);
+}
+
+#[test]
+fn strict_plan_does_not_apply_without_model_prefix() {
+    let config = config_with_strict_channel(&[(
+        "openai",
+        "/compatible-mode",
+        "/v1/chat/completions",
+    )]);
+    let plan = super::strict::apply_strict_plan(
+        &config,
+        "/v1/chat/completions",
+        &strict_request_meta("model-without-prefix"),
+        base_chat_plan(),
+    )
+    .expect("no prefix");
+    assert!(!plan.strict_passthrough);
+}
+
+#[test]
+fn strict_plan_does_not_apply_when_switch_off() {
+    let mut config = config_with_strict_channel(&[(
+        "openai",
+        "/compatible-mode",
+        "/v1/chat/completions",
+    )]);
+    for upstreams in config.upstreams.values_mut() {
+        for group in &mut upstreams.groups {
+            for upstream in &mut group.items {
+                upstream.url_compose.strict_protocol_passthrough = false;
+            }
+        }
+    }
+    let plan = super::strict::apply_strict_plan(
+        &config,
+        "/v1/chat/completions",
+        &strict_request_meta("strict-channel/model-a"),
+        base_chat_plan(),
+    )
+    .expect("switch off");
+    assert!(!plan.strict_passthrough);
+}
+// ══════════ STRICT-PROTOCOL-PASSTHROUGH TESTS END ══════════
+
+async fn send_chat_request_with_model(
+    state: ProxyStateHandle,
+    model: &str,
+) -> (StatusCode, Value) {
+    let response = proxy_request(
+        State(state),
+        Method::POST,
+        Uri::from_static(crate::proxy::openai_compat::CHAT_PATH),
+        HeaderMap::new(),
+        Body::from(
+            json!({
+                "model": model,
+                "messages": [{ "role": "user", "content": "hi" }],
+                "stream": false
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("proxy response bytes");
+    let json = serde_json::from_slice(&body).expect("proxy response json");
+    (status, json)
+}
+
+#[test]
+fn strict_passthrough_keeps_chat_on_chat_endpoint_without_responses_conversion() {
+    run_async(async {
+        let upstream = spawn_mock_upstream(
+            StatusCode::OK,
+            json!({
+                "id": "chatcmpl-strict",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "model-a",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "OK" },
+                    "finish_reason": "stop"
+                }],
+                "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+            }),
+        )
+        .await;
+        let data_dir = next_test_data_dir("strict_chat_stays_chat");
+        let mut config = config_with_runtime_upstreams(&[
+            (
+                PROVIDER_CHAT,
+                0,
+                "strict-channel",
+                upstream.base_url.as_str(),
+                FORMATS_CHAT,
+            ),
+            (
+                PROVIDER_RESPONSES,
+                0,
+                "strict-channel",
+                upstream.base_url.as_str(),
+                FORMATS_RESPONSES,
+            ),
+        ]);
+        let compose = token_proxy_config::my_url_compose::UrlComposeConfig {
+            strict_protocol_passthrough: true,
+            openai: Some(token_proxy_config::my_url_compose::FamilyCompose {
+                routes: vec![token_proxy_config::my_url_compose::EndpointCompose {
+                    prefix: "/compatible-mode".to_string(),
+                    suffix: "/v1/chat/completions".to_string(),
+                    strip_version: false,
+                }],
+                ..Default::default()
+            }),
+            openai_response: Some(token_proxy_config::my_url_compose::FamilyCompose {
+                routes: vec![token_proxy_config::my_url_compose::EndpointCompose {
+                    prefix: "/compatible-mode".to_string(),
+                    suffix: "/v1/responses".to_string(),
+                    strip_version: false,
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for upstreams in config.upstreams.values_mut() {
+            for group in &mut upstreams.groups {
+                for upstream in &mut group.items {
+                    if upstream.id == "strict-channel" {
+                        upstream.url_compose = compose.clone();
+                    }
+                }
+            }
+        }
+        let state = build_test_state_handle(config, data_dir).await;
+
+        let (status, body) = send_chat_request_with_model(state, "strict-channel/model-a").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["object"].as_str(), Some("chat.completion"));
+
+        let requests = upstream.requests();
+        assert_eq!(requests.len(), 1, "strict chat must not fall back to responses");
+        assert_eq!(requests[0].path, "/compatible-mode/v1/chat/completions");
+        assert!(requests[0].body.get("messages").is_some());
+        assert!(requests[0].body.get("input").is_none());
+
+        upstream.abort();
+    });
+}

@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::my_url_compose::{EndpointCompose, FamilyCompose, UrlComposeConfig};
 fn hot_model_test_upstream(model_mappings: Option<ModelMappingRules>) -> UpstreamRuntime {
     UpstreamRuntime {
         id: "test".to_string(),
@@ -107,8 +108,6 @@ fn proxy_config_file_defaults_include_hot_model_mappings() {
 
 #[test]
 fn test_upstream_url() {
-    use crate::my_url_compose::{EndpointCompose, UrlComposeConfig};
-
     fn runtime(base_url: &str, url_compose: UrlComposeConfig) -> UpstreamRuntime {
         UpstreamRuntime {
             id: "test".to_string(),
@@ -138,7 +137,7 @@ fn test_upstream_url() {
 
     fn openai_compose(prefix: &str, suffix: &str) -> UrlComposeConfig {
         UrlComposeConfig {
-            openai: Some(EndpointCompose {
+            openai: Some(FamilyCompose {
                 prefix: prefix.to_string(),
                 suffix: suffix.to_string(),
                 ..Default::default()
@@ -217,7 +216,7 @@ fn test_upstream_url() {
     let anthropic = runtime(
         "https://x.com",
         UrlComposeConfig {
-            anthropic: Some(EndpointCompose {
+            anthropic: Some(FamilyCompose {
                 prefix: "/anthropic".to_string(),
                 suffix: "/v1/messages".to_string(),
                 ..Default::default()
@@ -392,5 +391,92 @@ fn selected_upstream_model_capabilities_prefer_mapped_identity() {
             .capabilities_for_model(Some("alias"))
             .native_web_search,
         None
+    );
+}
+
+
+#[test]
+fn strict_compose_uses_matched_route() {
+    fn runtime_for_test(base_url: &str, url_compose: UrlComposeConfig) -> UpstreamRuntime {
+        UpstreamRuntime {
+            id: "test".to_string(),
+            selector_key: "test".to_string(),
+            base_url: base_url.to_string(),
+            api_key: None,
+            api_key_headers: None,
+            filter_prompt_cache_retention: false,
+            filter_safety_identifier: false,
+            rewrite_developer_role_to_system: false,
+            kiro_account_id: None,
+            codex_account_id: None,
+            xai_account_id: None,
+            kiro_preferred_endpoint: None,
+            proxy_url: None,
+            priority: 0,
+            available_models: Vec::new(),
+            advertised_model_ids: Vec::new(),
+            model_capabilities: Default::default(),
+            model_mappings: None,
+            header_overrides: None,
+            allowed_inbound_formats: Default::default(),
+            url_compose,
+            header_injection: None,
+        }
+    }
+
+    let compose = UrlComposeConfig {
+        strict_protocol_passthrough: true,
+        openai: Some(FamilyCompose {
+            routes: vec![
+                EndpointCompose {
+                    prefix: "/compatible-mode".to_string(),
+                    suffix: "/v1/chat/completions".to_string(),
+                    strip_version: false,
+                },
+                EndpointCompose {
+                    prefix: "/compatible-mode".to_string(),
+                    suffix: "/v1/embedding".to_string(),
+                    strip_version: false,
+                },
+            ],
+            ..Default::default()
+        }),
+        openai_response: Some(FamilyCompose {
+            routes: vec![EndpointCompose {
+                prefix: "/compatible-mode".to_string(),
+                suffix: "/v1/responses".to_string(),
+                strip_version: false,
+            }],
+            ..Default::default()
+        }),
+        dashscope: Some(FamilyCompose {
+            routes: vec![EndpointCompose {
+                prefix: "/api".to_string(),
+                suffix: "/v3/services/aigc/text-generation/generation".to_string(),
+                strip_version: false,
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let rt = runtime_for_test("https://opencode.ai/inference/go", compose);
+    assert_eq!(
+        rt.upstream_url("openai", "/v1/chat/completions"),
+        "https://opencode.ai/inference/go/compatible-mode/v1/chat/completions"
+    );
+    assert_eq!(
+        rt.upstream_url("openai", "/v1/embedding"),
+        "https://opencode.ai/inference/go/compatible-mode/v1/embedding"
+    );
+    assert_eq!(
+        rt.upstream_url("openai-response", "/v1/responses"),
+        "https://opencode.ai/inference/go/compatible-mode/v1/responses"
+    );
+    assert_eq!(
+        rt.upstream_url(
+            "dashscope",
+            "/v1/services/aigc/text-generation/generation"
+        ),
+        "https://opencode.ai/inference/go/api/v3/services/aigc/text-generation/generation"
     );
 }

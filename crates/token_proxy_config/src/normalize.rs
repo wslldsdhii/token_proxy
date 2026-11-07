@@ -174,6 +174,12 @@ fn normalize_single_upstream(
         .as_ref()
         .map(|value| value.normalized())
         .unwrap_or_default();
+    url_compose
+        .validate_strict_routes()
+        .map_err(|message| format!("upstream {}: {message}", upstream.id))?;
+    url_compose
+        .validate_strict_family_providers(&upstream.providers)
+        .map_err(|message| format!("upstream {}: {message}", upstream.id))?;
     crate::my_url_compose::warn_legacy_versioned_base_url(
         &upstream.id,
         &upstream.base_url,

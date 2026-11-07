@@ -31,7 +31,21 @@ pub(super) async fn forward_with_provider_fallbacks(
         detect_inbound_api_format(&prepared.path),
         headers,
     );
-    let mut current_response = if let Some(plans) =
+    let mut current_response = if prepared.plan.strict_passthrough {
+        // 严格协议透传：只走 URL 命中的 provider，不枚举其它协议、不跨协议回退。
+        super::priority::forward_by_priority(
+            &state,
+            &method,
+            uri,
+            headers,
+            prepared,
+            request_start,
+            vec![prepared.plan],
+            &codex_cooldown_scope,
+        )
+        .await
+        .response
+    } else if let Some(plans) =
         super::routes::compatible_plans(&state.config, &prepared.path, headers)
     {
         let dispatched: HashSet<_> = plans.iter().map(|plan| plan.provider).collect();
@@ -145,6 +159,10 @@ async fn forward_native_routes(
         codex_cooldown_scope,
     )
     .await;
+
+    if prepared.plan.strict_passthrough {
+        return primary.response;
+    }
 
     let mut current_response = primary.response;
     let mut current_provider = prepared.plan.provider;

@@ -11,7 +11,9 @@ import {
   type UpstreamForm,
   type UpstreamStrategy,
   type UrlComposeConfig,
+  type UrlComposeEndpoint,
   type UrlComposeFamily,
+  type UrlComposeFamilyConfig,
   TRAY_TOKEN_RATE_FORMATS,
 } from "@/features/config/types";
 import {
@@ -53,45 +55,77 @@ function normalizeUrlComposeSegment(value: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
+function normalizeUrlComposeRoutes(
+  endpoint: UrlComposeFamilyConfig | undefined,
+): UrlComposeEndpoint[] {
+  if (!endpoint) {
+    return [];
+  }
+  const source = endpoint.routes?.length
+    ? endpoint.routes
+    : endpoint.prefix || endpoint.suffix || endpoint.strip_version
+      ? [
+          {
+            prefix: endpoint.prefix ?? "",
+            suffix: endpoint.suffix ?? "",
+            strip_version: endpoint.strip_version,
+          },
+        ]
+      : [];
+  return source.map((route) => ({
+    prefix: normalizeUrlComposeSegment(route.prefix ?? ""),
+    suffix: normalizeUrlComposeSegment(route.suffix ?? ""),
+    // 稀疏透传：仅 true 时携带，保持既有表单形状不变。
+    ...(route.strip_version ? { strip_version: true } : {}),
+  }));
+}
+
 function toUrlComposeForm(
   value: UrlComposeConfig | undefined,
 ): UrlComposeConfig {
   const result: UrlComposeConfig = {};
+  if (value?.strict_protocol_passthrough) {
+    result.strict_protocol_passthrough = true;
+  }
   for (const family of URL_COMPOSE_FAMILIES) {
-    const endpoint = value?.[family];
-    if (!endpoint) {
+    const routes = normalizeUrlComposeRoutes(value?.[family]);
+    if (!routes.length) {
       continue;
     }
-    result[family] = {
-      prefix: normalizeUrlComposeSegment(endpoint.prefix ?? ""),
-      suffix: normalizeUrlComposeSegment(endpoint.suffix ?? ""),
-      // ══════════ MY-STRIP-VERSION PATCH 6 (form) START ══════════
-      // 稀疏透传：仅 true 时携带，保持既有表单形状不变（编辑器按 ?? false 读取）。
-      ...(endpoint.strip_version ? { strip_version: true } : {}),
-      // ══════════ MY-STRIP-VERSION PATCH 6 (form) END ══════════
-    };
+    // 单条规则保持旧单条草稿形状；多条才写 routes。
+    result[family] =
+      routes.length === 1
+        ? {
+            prefix: routes[0].prefix,
+            suffix: routes[0].suffix,
+            ...(routes[0].strip_version ? { strip_version: true } : {}),
+          }
+        : { routes };
   }
   return result;
 }
 
 function toUrlComposePayload(value: UrlComposeConfig): UrlComposeConfig | undefined {
   const result: UrlComposeConfig = {};
+  if (value.strict_protocol_passthrough) {
+    result.strict_protocol_passthrough = true;
+  }
   for (const family of URL_COMPOSE_FAMILIES) {
-    const endpoint = value[family];
-    if (!endpoint) {
+    const routes = normalizeUrlComposeRoutes(value[family]).filter(
+      (route) => route.prefix !== "" || route.suffix !== "" || route.strip_version === true,
+    );
+    if (!routes.length) {
       continue;
     }
-    const prefix = normalizeUrlComposeSegment(endpoint.prefix);
-    const suffix = normalizeUrlComposeSegment(endpoint.suffix);
-    // ══════════ MY-STRIP-VERSION PATCH 6 (form) START ══════════
-    const stripVersion = endpoint.strip_version === true;
-    // 前缀、后缀全空且未勾选去除版本号视为未配置该家族，保持落盘配置精简。
-    if (!prefix && !suffix && !stripVersion) {
-      continue;
-    }
-    // 仅勾选时落盘 strip_version，与后端 skip_serializing_if 对齐。
-    result[family] = stripVersion ? { prefix, suffix, strip_version: true } : { prefix, suffix };
-    // ══════════ MY-STRIP-VERSION PATCH 6 (form) END ══════════
+    // 单条规则保持旧单条形状（与后端 skip_serializing_if 对齐）；多条才写 routes。
+    result[family] =
+      routes.length === 1
+        ? {
+            prefix: routes[0].prefix,
+            suffix: routes[0].suffix,
+            ...(routes[0].strip_version ? { strip_version: true } : {}),
+          }
+        : { routes };
   }
   return Object.keys(result).length ? result : undefined;
 }

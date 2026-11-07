@@ -20,7 +20,7 @@ pub mod config;
 
 mod compose;
 
-pub use config::{EndpointCompose, UrlComposeConfig};
+pub use config::{match_key, EndpointCompose, FamilyCompose, UrlComposeConfig};
 pub(crate) use compose::compose_outbound_url;
 
 /// 旧 base_url 迁移提示：base 末段形如 `/v<数字>` 且未配置 `url_compose` 时，

@@ -6,7 +6,7 @@
 //!   其余路径（`/v1beta/...`、`/alpha/search` 等）原样拼接。
 //! - query 原样保留。
 
-use super::config::EndpointCompose;
+use super::config::{EndpointCompose, FamilyCompose};
 use super::config::DEFAULT_VERSION_SEGMENT;
 use crate::types::UpstreamRuntime;
 
@@ -18,8 +18,15 @@ pub(crate) fn compose_outbound_url(
     provider: &str,
     path_with_query: &str,
 ) -> String {
-    let compose = family_compose(upstream, provider);
-    compose_from_parts(&upstream.base_url, compose, path_with_query)
+    let family = family_compose(upstream, provider);
+    let route = match family {
+        Some(family) if upstream.url_compose.strict_protocol_passthrough => {
+            family.matching_route(path_with_query)
+        }
+        Some(family) => family.primary_route(),
+        None => None,
+    };
+    compose_from_parts(&upstream.base_url, route.as_ref(), path_with_query)
 }
 
 /// 家族解析：不能用路径反推（provider=openai 收到转换后的 `/v1/chat/completions`
@@ -27,17 +34,8 @@ pub(crate) fn compose_outbound_url(
 fn family_compose<'a>(
     upstream: &'a UpstreamRuntime,
     provider: &str,
-) -> Option<&'a EndpointCompose> {
-    let compose = &upstream.url_compose;
-    match provider {
-        "openai" => compose.openai.as_ref(),
-        "openai-response" | "xai" => compose.openai_response.as_ref(),
-        "anthropic" => compose.anthropic.as_ref(),
-        // ══════════ MY-DASHSCOPE-PASSTHROUGH PATCH 2 (compose) START ══════════
-        "dashscope" => compose.dashscope.as_ref(),
-        // ══════════ MY-DASHSCOPE-PASSTHROUGH PATCH 2 (compose) END ══════════
-        _ => None,
-    }
+) -> Option<&'a FamilyCompose> {
+    upstream.url_compose.family(provider)
 }
 
 fn compose_from_parts(

@@ -17,12 +17,14 @@ use super::{
     PROVIDER_DASHSCOPE, PROVIDER_GEMINI, PROVIDER_KIRO, PROVIDER_XAI,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct DispatchPlan {
     pub(super) provider: &'static str,
     pub(super) outbound_path: Option<&'static str>,
     pub(super) request_transform: FormatTransform,
     pub(super) response_transform: FormatTransform,
+    /// 请求匹配协议透传：协议已由 URL 规则锁定，禁止跨协议转换与回退。
+    pub(super) strict_passthrough: bool,
 }
 
 struct ProviderRank {
@@ -44,6 +46,7 @@ fn base_plan(provider: &'static str) -> DispatchPlan {
         outbound_path: None,
         request_transform: FormatTransform::None,
         response_transform: FormatTransform::None,
+        strict_passthrough: false,
     }
 }
 
@@ -170,6 +173,7 @@ fn resolve_openai_native_plan(
                 outbound_path: Some(CODEX_RESPONSES_PATH),
                 request_transform: FormatTransform::ImagesGenerationsToCodex,
                 response_transform: FormatTransform::CodexToImagesGenerations,
+                strict_passthrough: false,
             }));
         }
         let provider =
@@ -194,6 +198,7 @@ fn resolve_codex_alpha_search_plan(
         outbound_path: Some(CODEX_ALPHA_SEARCH_OUTBOUND_PATH),
         request_transform: FormatTransform::None,
         response_transform: FormatTransform::None,
+        strict_passthrough: false,
     }))
 }
 
@@ -234,6 +239,7 @@ fn resolve_anthropic_plan(
                 outbound_path: Some(RESPONSES_INPUT_TOKENS_PATH),
                 request_transform: FormatTransform::AnthropicCountTokensToResponsesInputTokens,
                 response_transform: FormatTransform::ResponsesInputTokensToAnthropicCountTokens,
+                strict_passthrough: false,
             }));
         }
     }
@@ -326,6 +332,7 @@ fn resolve_models_plan(
             outbound_path: Some(codex_models_manifest::CODEX_MODELS_MANIFEST_PATH),
             request_transform: FormatTransform::None,
             response_transform: FormatTransform::None,
+            strict_passthrough: false,
         }));
     }
     if is_openai_compatible_models_path(path) {
@@ -455,6 +462,7 @@ fn build_retry_fallback_plan(path: &str, provider: &'static str) -> Option<Dispa
                 outbound_path: Some(CODEX_RESPONSES_PATH),
                 request_transform: FormatTransform::ImagesGenerationsToCodex,
                 response_transform: FormatTransform::CodexToImagesGenerations,
+                strict_passthrough: false,
             }),
             _ => None,
         };

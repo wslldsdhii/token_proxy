@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -383,4 +383,81 @@ describe("config/url-compose-editor", () => {
     });
   });
   // ══════════ MY-STRIP-VERSION PATCH 9 (test) END ══════════
+});
+
+
+describe("config/url-compose-editor strict passthrough", () => {
+  it("严格透传复选框默认关闭，勾选/取消写入草稿", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup({ providers: ["openai"] });
+    await expand(user);
+
+    const label = screen.getByTestId("url-compose-strict");
+    const checkbox = label.querySelector("button[role=checkbox]") as HTMLElement;
+    expect(checkbox.getAttribute("data-state")).toBe("unchecked");
+
+    await user.click(checkbox);
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as UrlComposeConfig;
+      expect(lastCall.strict_protocol_passthrough).toBe(true);
+    });
+
+    await user.click(checkbox);
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as UrlComposeConfig;
+      expect(lastCall.strict_protocol_passthrough).toBeUndefined();
+    });
+  });
+
+  it("添加第二条规则后写入 routes 数组", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup({
+      providers: ["openai"],
+      value: {
+        openai: { prefix: "/compatible-mode", suffix: "/v1/chat/completions" },
+      },
+    });
+    await expand(user);
+
+    await user.click(screen.getByTestId("url-compose-add-openai"));
+    const rows = await screen.findAllByTestId(/url-compose-route-openai-/);
+    expect(rows.length).toBe(2);
+
+    const secondSuffix = within(rows[1]).getAllByRole("textbox")[1];
+    await user.type(secondSuffix, "/v1/embedding");
+
+    await waitFor(() => {
+      const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0] as UrlComposeConfig;
+      expect(lastCall.openai?.routes).toHaveLength(2);
+      expect(lastCall.openai?.routes?.[1].suffix).toBe("/v1/embedding");
+    });
+  });
+
+  it("旧单条配置回显为一条规则", async () => {
+    const user = userEvent.setup();
+    setup({
+      providers: ["openai"],
+      value: {
+        openai: { prefix: "/openai", suffix: "/v1/chat/completions" },
+      },
+    });
+    await expand(user);
+    expect(screen.getByTestId("url-compose-route-openai-0")).toBeDefined();
+    expect(screen.queryByTestId("url-compose-route-openai-1")).toBeNull();
+  });
+
+  it("重复匹配键显示提示", async () => {
+    const user = userEvent.setup();
+    setup({
+      providers: ["openai", "openai-response"],
+      value: {
+        openai: { prefix: "/a", suffix: "/v1/chat/completions" },
+        "openai-response": { prefix: "/b", suffix: "/v1/chat/completions" },
+      },
+    });
+    await expand(user);
+    await waitFor(() => {
+      expect(screen.getByText(/Duplicate match keys|存在重复的匹配键/)).toBeDefined();
+    });
+  });
 });

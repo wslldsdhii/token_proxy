@@ -750,5 +750,10 @@
   "upstreams_header_injection_option_session": "X-Session-ID（通用兼容）",
   "upstreams_header_injection_option_opencode": "X-Opencode-Session（OpenCode Go）",
   "upstreams_header_injection_fallback_tip": "注入回退",
-  "upstreams_header_injection_hint": "默认 X-Session-ID；接入 OpenCode Go 时选择 X-Opencode-Session。回退关闭时未检测到标记原样透传；开启回退后无会话头时生成并绑定会话 ID。"
+  "upstreams_header_injection_hint": "默认 X-Session-ID；接入 OpenCode Go 时选择 X-Opencode-Session。回退关闭时未检测到标记原样透传；开启回退后无会话头时生成并绑定会话 ID。",
+  "url_compose_strict_passthrough": "请求匹配协议透传",
+  "url_compose_strict_hint": "开启后协议只由请求 URL 规则匹配决定，不读取请求体格式、不做协议转换；未命中任何规则将直接报错。",
+  "url_compose_add_route": "添加接口",
+  "url_compose_remove_route": "删除",
+  "url_compose_duplicate_keys": "存在重复的匹配键：{keys}，保存会被拒绝。"
 }

@@ -750,5 +750,10 @@
   "upstreams_header_injection_option_session": "X-Session-ID (general)",
   "upstreams_header_injection_option_opencode": "X-Opencode-Session (OpenCode Go)",
   "upstreams_header_injection_fallback_tip": "Injection fallback",
-  "upstreams_header_injection_hint": "Default X-Session-ID. Choose X-Opencode-Session when the channel points at OpenCode Go. With fallback off, requests without a marker pass through unchanged; with fallback on, a session id is generated and bound when neither session header is present."
+  "upstreams_header_injection_hint": "Default X-Session-ID. Choose X-Opencode-Session when the channel points at OpenCode Go. With fallback off, requests without a marker pass through unchanged; with fallback on, a session id is generated and bound when neither session header is present.",
+  "url_compose_strict_passthrough": "Strict protocol passthrough",
+  "url_compose_strict_hint": "When enabled, the protocol is chosen only by request URL rule matching: the request body format is ignored and no protocol conversion is performed. No matching rule returns an error.",
+  "url_compose_add_route": "Add endpoint",
+  "url_compose_remove_route": "Remove",
+  "url_compose_duplicate_keys": "Duplicate match keys: {keys}; saving will be rejected."
 }

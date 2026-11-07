@@ -140,6 +140,7 @@ pub(super) async fn build_outbound_body_or_respond(
     body: ReplayableBody,
     request_start: Instant,
     max_request_body_bytes: usize,
+    force_stream_options: bool,
 ) -> Result<ReplayableBody, Response> {
     let body = transform_body_or_respond(
         http_clients,
@@ -165,6 +166,7 @@ pub(super) async fn build_outbound_body_or_respond(
         body,
         request_start,
         max_request_body_bytes,
+        force_stream_options,
     )
     .await
 }
@@ -222,6 +224,7 @@ async fn apply_openai_stream_options_or_respond(
     body: ReplayableBody,
     request_start: Instant,
     max_request_body_bytes: usize,
+    force_stream_options: bool,
 ) -> Result<ReplayableBody, Response> {
     match maybe_force_openai_stream_options_include_usage(
         plan.provider,
@@ -229,6 +232,7 @@ async fn apply_openai_stream_options_or_respond(
         meta,
         body,
         max_request_body_bytes,
+        force_stream_options,
     )
     .await
     {

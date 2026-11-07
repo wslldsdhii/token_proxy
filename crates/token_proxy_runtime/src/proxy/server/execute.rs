@@ -54,6 +54,11 @@ pub(super) async fn prepare_dispatch_request_for_model(
     } else {
         prepared.source_body.clone()
     };
+    let force_stream_options =
+        !crate::proxy::server_helpers::target_upstream_is_opencode_go_portable(
+            &state.config,
+            prepared.meta.original_model.as_deref(),
+        );
     let body = build_outbound_body_or_respond(
         &state.http_clients,
         &state.log,
@@ -66,6 +71,7 @@ pub(super) async fn prepare_dispatch_request_for_model(
         source_body,
         request_start,
         state.config.max_request_body_bytes,
+        force_stream_options,
     )
     .await?;
     Ok(OutboundRequest {

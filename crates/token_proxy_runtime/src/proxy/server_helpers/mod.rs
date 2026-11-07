@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 #[cfg(test)]
 use super::openai_compat::{PROVIDER_RESPONSES, RESPONSES_PATH};
 use super::{
+    config::ProxyConfig,
     gemini,
     http_client::ProxyHttpClients,
     openai_compat::{
@@ -168,26 +169,20 @@ pub(crate) fn parse_openai_reasoning_effort_from_model_suffix(
 }
 
 fn ensure_stream_options_include_usage(object: &mut Map<String, Value>) -> bool {
-    let include_usage = object
-        .get("stream_options")
-        .and_then(Value::as_object)
-        .and_then(|options| options.get("include_usage"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if include_usage {
-        return false;
+    if let Some(Value::Object(options)) = object.get_mut("stream_options") {
+        // 客户端显式提供 include_usage（true 或 false）时尊重其选择。
+        if options.contains_key("include_usage") {
+            return false;
+        }
+        options.insert("include_usage".to_string(), Value::Bool(true));
+        return true;
     }
 
-    let options = match object.get_mut("stream_options") {
-        Some(Value::Object(options)) => options,
-        _ => {
-            object.insert("stream_options".to_string(), Value::Object(Map::new()));
-            object
-                .get_mut("stream_options")
-                .and_then(Value::as_object_mut)
-                .expect("stream_options must be object")
-        }
-    };
+    object.insert("stream_options".to_string(), Value::Object(Map::new()));
+    let options = object
+        .get_mut("stream_options")
+        .and_then(Value::as_object_mut)
+        .expect("stream_options must be object");
     options.insert("include_usage".to_string(), Value::Bool(true));
     true
 }
@@ -378,8 +373,9 @@ pub(crate) async fn maybe_force_openai_stream_options_include_usage(
     meta: &RequestMeta,
     body: ReplayableBody,
     max_request_body_bytes: usize,
+    force: bool,
 ) -> Result<ReplayableBody, RequestError> {
-    if provider != PROVIDER_CHAT || outbound_path != CHAT_PATH || !meta.stream {
+    if !force || provider != PROVIDER_CHAT || outbound_path != CHAT_PATH || !meta.stream {
         return Ok(body);
     }
 
@@ -422,6 +418,43 @@ pub(crate) async fn maybe_force_openai_stream_options_include_usage(
     )
     .await;
     Ok(outbound_body)
+}
+
+/// 目标渠道是否为 OpenCode Go 便携路由（Chat → Responses 翻译层）。
+///
+/// 该层不接受 `stream_options`；代理不应主动补 `include_usage`，否则会得到 400。
+pub(crate) fn target_upstream_is_opencode_go_portable(
+    config: &ProxyConfig,
+    original_model: Option<&str>,
+) -> bool {
+    let Some(original_model) = original_model else {
+        return false;
+    };
+    let Some((prefix, rest)) = original_model.split_once('/') else {
+        return false;
+    };
+    if prefix.trim().is_empty() || rest.trim().is_empty() {
+        return false;
+    }
+    let Some(upstreams) = config.provider_upstreams(PROVIDER_CHAT) else {
+        return false;
+    };
+    upstreams
+        .groups
+        .iter()
+        .flat_map(|group| group.items.iter())
+        .find(|upstream| upstream.id == prefix)
+        .is_some_and(|upstream| is_opencode_go_base_url(&upstream.base_url))
+}
+
+fn is_opencode_go_base_url(base_url: &str) -> bool {
+    let Ok(url) = url::Url::parse(base_url) else {
+        return false;
+    };
+    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    let path = url.path().trim_end_matches('/');
+    (host == "opencode.ai" || host.ends_with(".opencode.ai"))
+        && (path.starts_with("/inference/go") || path.starts_with("/zen/go"))
 }
 
 #[cfg(test)]

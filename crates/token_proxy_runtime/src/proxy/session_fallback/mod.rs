@@ -1,15 +1,17 @@
 //! Session fallback：无标记/无会话头时生成 ID，并用首轮 user+assistant 指纹绑定。
 //!
 //! 设计要点：
+//! - 首条 user 使用最后一个 `<user_input>` 作为稳定锚点；哈希前剔除全部空白/零宽字符。
+//! - assistant 分 Absent / Present / PresentEmpty 三态；PresentEmpty 使用降级绑定，不再每轮新建。
+//! - 查找顺序：request pending → 精确 binding → 旧 binding → user 锚点唯一命中 →
+//!   user 锚点 pending 补绑定 → 新建。
 //! - 内存最多 50 条 LRU；内存未满时未命中不读文件；内存满且未命中才查文件。
-//! - 新绑定立即落盘；`last_used_at` 30 秒 debounce；1 小时 TTL 清理。
-//! - pending 以 `(request_id, upstream_id)` 为键，重试复用同一 ID。
-//! - 只存哈希与 ID，不存对话原文。
+//! - 同一 `(upstream_id, id)` 只保留一条记录；新绑定立即落盘；30 秒 debounce；7 天 TTL。
 
 pub(crate) mod extract;
 pub(crate) mod stream;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -19,14 +21,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
 
-use extract::binding_hash;
+use extract::{binding_hash, SessionFingerprint};
 
 pub(crate) const FALLBACK_FILE_NAME: &str = "header_injection_fallback.json";
 const MEMORY_LIMIT: usize = 50;
 const PENDING_LIMIT: usize = 50;
 const FILE_LIMIT: usize = 1000;
-const TTL: Duration = Duration::from_secs(60 * 60);
-const TTL_MS: u64 = 60 * 60 * 1000;
+/// 映射保留 7 天；1 小时对真实编码会话太短，中途暂停会换 ID。
+const TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 const DEBOUNCE: Duration = Duration::from_secs(30);
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -57,6 +60,9 @@ struct Key {
 struct Entry {
     upstream_id: String,
     hash: String,
+    /// 首条 user 锚点哈希；旧文件缺省为空字符串。
+    #[serde(default)]
+    user_hash: String,
     id: String,
     created_at: u64,
     last_used_at: u64,
@@ -73,6 +79,7 @@ struct MemoryEntry {
 #[derive(Clone, Debug)]
 struct Pending {
     id: String,
+    /// 首条 user 锚点哈希；响应提交时与新 assistant 哈希合成 binding。
     user_hash: String,
     created_at: Instant,
 }
@@ -166,12 +173,16 @@ impl SessionFallbackStore {
             .len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn file_entry_count(&self) -> usize {
+        read_file_entries(&self.inner.file).len()
+    }
+
     pub(crate) fn resolve(
         &self,
         upstream_id: &str,
         request_id: &str,
-        user_hash: &str,
-        assistant_hash: Option<&str>,
+        fingerprint: &SessionFingerprint,
     ) -> FallbackResolution {
         let pending_key = (request_id.to_string(), upstream_id.to_string());
         if let Some(pending) = self
@@ -181,21 +192,34 @@ impl SessionFallbackStore {
             .unwrap_or_else(|err| err.into_inner())
             .get(&pending_key)
         {
+            tracing::debug!(
+                upstream_id,
+                id = pending.id,
+                match_kind = "request_pending",
+                "session fallback resolved"
+            );
             return FallbackResolution::Pending {
                 id: pending.id.clone(),
                 capture: self.capture(request_id, upstream_id),
             };
         }
 
-        let Some(assistant_hash) = assistant_hash else {
+        // Absent：真正的首轮，没有可匹配的 assistant 指纹。
+        let Some(binding_hash) = fingerprint.binding_hash.as_deref() else {
             let id = generate_id();
             self.insert_pending(
                 pending_key,
                 Pending {
                     id: id.clone(),
-                    user_hash: user_hash.to_string(),
+                    user_hash: fingerprint.user_anchor_hash.clone(),
                     created_at: Instant::now(),
                 },
+            );
+            tracing::debug!(
+                upstream_id,
+                id,
+                match_kind = "new_pending",
+                "session fallback allocated pending"
             );
             return FallbackResolution::Pending {
                 id,
@@ -203,34 +227,85 @@ impl SessionFallbackStore {
             };
         };
 
-        let key = Key {
-            upstream_id: upstream_id.to_string(),
-            binding_hash: binding_hash(user_hash, assistant_hash),
-        };
-        if let Some(id) = self.memory_hit(&key) {
-            return FallbackResolution::Existing(id);
+        if let Some(entry) = self.find_by_binding(upstream_id, binding_hash) {
+            tracing::debug!(
+                upstream_id,
+                id = entry.id,
+                match_kind = "binding",
+                hash_prefix = %hash_prefix(&entry.hash),
+                "session fallback resolved"
+            );
+            return FallbackResolution::Existing(entry.id);
         }
 
-        let memory_len = self
-            .inner
-            .memory
-            .read()
-            .unwrap_or_else(|err| err.into_inner())
-            .len();
-        if memory_len < MEMORY_LIMIT {
-            let id = generate_id();
-            self.insert_entry(self.new_entry(upstream_id, key.binding_hash.clone(), id.clone()));
-            return FallbackResolution::Existing(id);
+        if let Some(legacy_hash) = fingerprint.legacy_binding_hash.as_deref() {
+            if let Some(entry) = self.find_by_binding(upstream_id, legacy_hash) {
+                let id = entry.id.clone();
+                self.rekey_entry(entry, binding_hash, &fingerprint.user_anchor_hash);
+                tracing::debug!(
+                    upstream_id,
+                    id,
+                    match_kind = "legacy_binding",
+                    hash_prefix = %hash_prefix(binding_hash),
+                    "session fallback rekeyed legacy binding"
+                );
+                return FallbackResolution::Existing(id);
+            }
         }
 
-        if let Some(entry) = self.read_file_entry(&key) {
+        if let Some(entry) =
+            self.find_by_user_anchor_unique(upstream_id, &fingerprint.user_anchor_hash)
+        {
             let id = entry.id.clone();
-            self.insert_entry(entry);
+            self.rekey_entry(entry, binding_hash, &fingerprint.user_anchor_hash);
+            tracing::debug!(
+                upstream_id,
+                id,
+                match_kind = "user_anchor",
+                degraded = fingerprint.degraded,
+                hash_prefix = %hash_prefix(binding_hash),
+                "session fallback reused by user anchor"
+            );
             return FallbackResolution::Existing(id);
+        }
+
+        if fingerprint.has_assistant_message {
+            if let Some(pending) =
+                self.take_pending_by_user_anchor(upstream_id, &fingerprint.user_anchor_hash)
+            {
+                let entry = self.new_entry(
+                    upstream_id,
+                    binding_hash.to_string(),
+                    fingerprint.user_anchor_hash.clone(),
+                    pending.id.clone(),
+                );
+                self.insert_entry(entry);
+                tracing::debug!(
+                    upstream_id,
+                    id = pending.id,
+                    match_kind = "anchor_pending",
+                    "session fallback bound pending from history"
+                );
+                return FallbackResolution::Existing(pending.id);
+            }
         }
 
         let id = generate_id();
-        self.insert_entry(self.new_entry(upstream_id, key.binding_hash.clone(), id.clone()));
+        let entry = self.new_entry(
+            upstream_id,
+            binding_hash.to_string(),
+            fingerprint.user_anchor_hash.clone(),
+            id.clone(),
+        );
+        self.insert_entry(entry);
+        tracing::debug!(
+            upstream_id,
+            id,
+            match_kind = "new_binding",
+            degraded = fingerprint.degraded,
+            hash_prefix = %hash_prefix(binding_hash),
+            "session fallback created new binding"
+        );
         FallbackResolution::Existing(id)
     }
 
@@ -246,16 +321,17 @@ impl SessionFallbackStore {
             return;
         };
         let hash = binding_hash(&pending.user_hash, assistant_hash);
-        let key = Key {
-            upstream_id: upstream_id.to_string(),
-            binding_hash: hash.clone(),
-        };
-        let entry = self.new_entry(upstream_id, hash, pending.id.clone());
+        let entry = self.new_entry(
+            upstream_id,
+            hash.clone(),
+            pending.user_hash.clone(),
+            pending.id.clone(),
+        );
         self.insert_entry(entry);
         tracing::debug!(
             upstream_id,
             id = pending.id,
-            hash_prefix = %hash_prefix(&key.binding_hash),
+            hash_prefix = %hash_prefix(&hash),
             "session fallback bound first exchange"
         );
     }
@@ -280,7 +356,7 @@ impl SessionFallbackStore {
             }
         }
         if !due.is_empty() {
-            self.persist_entries(&due);
+            self.persist_entries(&due, &[]);
         }
     }
 
@@ -311,6 +387,7 @@ impl SessionFallbackStore {
         let mut entries = read_file_entries(&self.inner.file);
         let before = entries.len();
         entries.retain(|entry| now_ms.saturating_sub(entry.last_used_at) < TTL_MS);
+        entries = dedupe_entries_by_id(entries);
         entries.sort_by_key(|entry| std::cmp::Reverse(entry.last_used_at));
         entries.truncate(FILE_LIMIT);
         if entries.len() != before {
@@ -326,18 +403,27 @@ impl SessionFallbackStore {
         }
     }
 
-    fn new_entry(&self, upstream_id: &str, hash: String, id: String) -> Entry {
+    fn new_entry(&self, upstream_id: &str, hash: String, user_hash: String, id: String) -> Entry {
         let now = now_ms();
         Entry {
             upstream_id: upstream_id.to_string(),
             hash,
+            user_hash,
             id,
             created_at: now,
             last_used_at: now,
         }
     }
 
-    fn memory_hit(&self, key: &Key) -> Option<String> {
+    fn memory_len(&self) -> usize {
+        self.inner
+            .memory
+            .read()
+            .unwrap_or_else(|err| err.into_inner())
+            .len()
+    }
+
+    fn touch_memory_key(&self, key: &Key) -> Option<Entry> {
         let now = now_ms();
         let mut memory = self
             .inner
@@ -349,15 +435,157 @@ impl SessionFallbackStore {
         entry.last_activity = Instant::now();
         entry.dirty = true;
         entry.touch_seq = self.inner.touch_seq.fetch_add(1, Ordering::Relaxed);
-        Some(entry.entry.id.clone())
+        Some(entry.entry.clone())
     }
 
+    fn find_by_binding(&self, upstream_id: &str, binding_hash: &str) -> Option<Entry> {
+        let key = Key {
+            upstream_id: upstream_id.to_string(),
+            binding_hash: binding_hash.to_string(),
+        };
+        if let Some(entry) = self.touch_memory_key(&key) {
+            return Some(entry);
+        }
+        if self.memory_len() < MEMORY_LIMIT {
+            return None;
+        }
+        let entry = self.read_file_entry(&key)?;
+        self.insert_entry(entry.clone());
+        Some(entry)
+    }
+
+    /// 同一 user 锚点只对应一个 ID 时返回该条；多个 ID 视为歧义。
+    fn find_by_user_anchor_unique(&self, upstream_id: &str, user_hash: &str) -> Option<Entry> {
+        let mut candidates: Vec<(Option<Key>, Entry)> = Vec::new();
+        {
+            let memory = self
+                .inner
+                .memory
+                .read()
+                .unwrap_or_else(|err| err.into_inner());
+            for (key, value) in memory.iter() {
+                if key.upstream_id == upstream_id && value.entry.user_hash == user_hash {
+                    candidates.push((Some(key.clone()), value.entry.clone()));
+                }
+            }
+        }
+        if self.memory_len() >= MEMORY_LIMIT {
+            for entry in self.file_entries_by_user(upstream_id, user_hash) {
+                if !candidates.iter().any(|(_, item)| item.id == entry.id) {
+                    candidates.push((None, entry));
+                }
+            }
+        }
+
+        let ids: HashSet<String> = candidates.iter().map(|(_, entry)| entry.id.clone()).collect();
+        if ids.len() != 1 {
+            return None;
+        }
+        let id = ids.into_iter().next()?;
+        if let Some((Some(key), _)) = candidates.iter().find(|(_, entry)| entry.id == id) {
+            return self.touch_memory_key(key);
+        }
+        let entry = candidates
+            .into_iter()
+            .find(|(_, entry)| entry.id == id)
+            .map(|(_, entry)| entry)?;
+        self.insert_entry(entry.clone());
+        Some(entry)
+    }
+
+    fn take_pending_by_user_anchor(&self, upstream_id: &str, user_hash: &str) -> Option<Pending> {
+        let mut pending = self
+            .inner
+            .pending
+            .write()
+            .unwrap_or_else(|err| err.into_inner());
+        let matches: Vec<PendingKey> = pending
+            .iter()
+            .filter(|((_, upstream), value)| {
+                upstream == upstream_id && value.user_hash == user_hash
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        if matches.len() != 1 {
+            return None;
+        }
+        pending.remove(&matches[0])
+    }
+
+    fn file_entries_by_user(&self, upstream_id: &str, user_hash: &str) -> Vec<Entry> {
+        let _guard = self.inner.io.lock().unwrap_or_else(|err| err.into_inner());
+        read_file_entries(&self.inner.file)
+            .into_iter()
+            .filter(|entry| {
+                entry.upstream_id == upstream_id
+                    && !entry.user_hash.is_empty()
+                    && entry.user_hash == user_hash
+            })
+            .collect()
+    }
+
+    /// 插入或更新一条映射；同一 ID 在内存中已存在时 rekey，而不是新增记录。
     fn insert_entry(&self, mut entry: Entry) {
         entry.last_used_at = now_ms();
         let key = Key {
             upstream_id: entry.upstream_id.clone(),
             binding_hash: entry.hash.clone(),
         };
+
+        let existing = {
+            let memory = self
+                .inner
+                .memory
+                .read()
+                .unwrap_or_else(|err| err.into_inner());
+            memory
+                .iter()
+                .find(|(key, value)| {
+                    key.upstream_id == entry.upstream_id && value.entry.id == entry.id
+                })
+                .map(|(key, value)| (key.clone(), value.entry.hash.clone()))
+        };
+
+        match existing {
+            Some((old_key, old_hash)) if old_hash == entry.hash => {
+                let mut memory = self
+                    .inner
+                    .memory
+                    .write()
+                    .unwrap_or_else(|err| err.into_inner());
+                if let Some(value) = memory.get_mut(&old_key) {
+                    value.entry.last_used_at = entry.last_used_at;
+                    value.entry.user_hash = entry.user_hash;
+                    value.last_activity = Instant::now();
+                    value.dirty = true;
+                    value.touch_seq = self.inner.touch_seq.fetch_add(1, Ordering::Relaxed);
+                }
+                return;
+            }
+            Some((old_key, old_hash)) => {
+                let old_upstream = old_key.upstream_id.clone();
+                let mut memory = self
+                    .inner
+                    .memory
+                    .write()
+                    .unwrap_or_else(|err| err.into_inner());
+                memory.remove(&old_key);
+                memory.insert(
+                    key,
+                    MemoryEntry {
+                        entry: entry.clone(),
+                        last_activity: Instant::now(),
+                        dirty: true,
+                        touch_seq: self.inner.touch_seq.fetch_add(1, Ordering::Relaxed),
+                    },
+                );
+                drop(memory);
+                self.persist_entries(&[entry], &[(old_upstream, old_hash)]);
+                return;
+            }
+            None => {}
+        }
+
         let mut to_persist = vec![entry.clone()];
         {
             let mut memory = self
@@ -389,7 +617,42 @@ impl SessionFallbackStore {
                 }
             }
         }
-        self.persist_entries(&to_persist);
+        self.persist_entries(&to_persist, &[]);
+    }
+
+    /// 把既有 entry 从旧 binding 迁移到新 binding（同一 ID）。
+    fn rekey_entry(&self, entry: Entry, new_hash: &str, user_hash: &str) {
+        let old_key = Key {
+            upstream_id: entry.upstream_id.clone(),
+            binding_hash: entry.hash.clone(),
+        };
+        let new_key = Key {
+            upstream_id: entry.upstream_id.clone(),
+            binding_hash: new_hash.to_string(),
+        };
+        let mut updated = entry;
+        updated.hash = new_hash.to_string();
+        updated.user_hash = user_hash.to_string();
+        updated.last_used_at = now_ms();
+
+        {
+            let mut memory = self
+                .inner
+                .memory
+                .write()
+                .unwrap_or_else(|err| err.into_inner());
+            memory.remove(&old_key);
+            memory.insert(
+                new_key,
+                MemoryEntry {
+                    entry: updated.clone(),
+                    last_activity: Instant::now(),
+                    dirty: true,
+                    touch_seq: self.inner.touch_seq.fetch_add(1, Ordering::Relaxed),
+                },
+            );
+        }
+        self.persist_entries(&[updated], &[(old_key.upstream_id, old_key.binding_hash)]);
     }
 
     fn insert_pending(&self, key: PendingKey, pending: Pending) {
@@ -411,8 +674,8 @@ impl SessionFallbackStore {
         map.insert(key, pending);
     }
 
-    fn persist_entries(&self, entries: &[Entry]) {
-        if entries.is_empty() {
+    fn persist_entries(&self, entries: &[Entry], removals: &[(String, String)]) {
+        if entries.is_empty() && removals.is_empty() {
             return;
         }
         let _guard = self.inner.io.lock().unwrap_or_else(|err| err.into_inner());
@@ -420,6 +683,9 @@ impl SessionFallbackStore {
             .into_iter()
             .map(|entry| ((entry.upstream_id.clone(), entry.hash.clone()), entry))
             .collect();
+        for (upstream_id, hash) in removals {
+            merged.remove(&(upstream_id.clone(), hash.clone()));
+        }
         for entry in entries {
             let key = (entry.upstream_id.clone(), entry.hash.clone());
             match merged.get(&key) {
@@ -429,7 +695,7 @@ impl SessionFallbackStore {
                 }
             }
         }
-        let mut all: Vec<Entry> = merged.into_values().collect();
+        let mut all = dedupe_entries_by_id(merged.into_values().collect());
         all.sort_by_key(|entry| std::cmp::Reverse(entry.last_used_at));
         all.truncate(FILE_LIMIT);
         write_file_entries(&self.inner.file, &all);
@@ -448,6 +714,7 @@ impl SessionFallbackStore {
         let now_ms = now_ms();
         let before = entries.len();
         entries.retain(|entry| now_ms.saturating_sub(entry.last_used_at) < TTL_MS);
+        entries = dedupe_entries_by_id(entries);
         entries.sort_by_key(|entry| std::cmp::Reverse(entry.last_used_at));
         entries.truncate(FILE_LIMIT);
         if entries.len() != before {
@@ -510,6 +777,21 @@ impl SessionFallbackStore {
             }
         });
     }
+}
+
+/// 同一 `(upstream_id, id)` 只保留 `last_used_at` 最新的一条。
+fn dedupe_entries_by_id(entries: Vec<Entry>) -> Vec<Entry> {
+    let mut by_id: HashMap<(String, String), Entry> = HashMap::new();
+    for entry in entries {
+        let key = (entry.upstream_id.clone(), entry.id.clone());
+        match by_id.get(&key) {
+            Some(existing) if existing.last_used_at >= entry.last_used_at => {}
+            _ => {
+                by_id.insert(key, entry);
+            }
+        }
+    }
+    by_id.into_values().collect()
 }
 
 fn read_file_entries(path: &Path) -> Vec<Entry> {

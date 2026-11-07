@@ -58,6 +58,7 @@ fn force_openai_chat_stream_usage_inserts_stream_options_include_usage() {
             &meta,
             body,
             TEST_MAX_REQUEST_BODY_BYTES,
+            true,
         )
         .await
         .expect("ok");
@@ -69,6 +70,91 @@ fn force_openai_chat_stream_usage_inserts_stream_options_include_usage() {
         let value: Value = serde_json::from_slice(&bytes).expect("json");
         assert_eq!(value["stream_options"]["include_usage"], Value::Bool(true));
     });
+}
+
+#[test]
+fn force_flag_false_keeps_stream_options_untouched() {
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    rt.block_on(async {
+        let input = Bytes::from_static(br#"{"stream":true,"messages":[]}"#);
+        let meta = RequestMeta {
+            client_ip: None,
+            stream: true,
+            original_model: Some("opencode-go/deepseek-v4.1-flash-go-proxy".to_string()),
+            mapped_model: None,
+            reasoning_effort: None,
+            response_format: None,
+            estimated_input_tokens: None,
+            billing: Default::default(),
+        };
+        let body = ReplayableBody::from_bytes(input);
+        let output = maybe_force_openai_stream_options_include_usage(
+            PROVIDER_CHAT,
+            CHAT_PATH,
+            &meta,
+            body,
+            TEST_MAX_REQUEST_BODY_BYTES,
+            false,
+        )
+        .await
+        .expect("ok");
+        let bytes = output
+            .read_bytes_if_small(1024)
+            .await
+            .expect("read")
+            .expect("bytes");
+        let value: Value = serde_json::from_slice(&bytes).expect("json");
+        assert!(value.get("stream_options").is_none());
+    });
+}
+
+#[test]
+fn client_explicit_include_usage_false_is_preserved() {
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    rt.block_on(async {
+        let input = Bytes::from_static(
+            br#"{"stream":true,"stream_options":{"include_usage":false},"messages":[]}"#,
+        );
+        let meta = RequestMeta {
+            client_ip: None,
+            stream: true,
+            original_model: None,
+            mapped_model: None,
+            reasoning_effort: None,
+            response_format: None,
+            estimated_input_tokens: None,
+            billing: Default::default(),
+        };
+        let body = ReplayableBody::from_bytes(input);
+        let output = maybe_force_openai_stream_options_include_usage(
+            PROVIDER_CHAT,
+            CHAT_PATH,
+            &meta,
+            body,
+            TEST_MAX_REQUEST_BODY_BYTES,
+            true,
+        )
+        .await
+        .expect("ok");
+        let bytes = output
+            .read_bytes_if_small(1024)
+            .await
+            .expect("read")
+            .expect("bytes");
+        let value: Value = serde_json::from_slice(&bytes).expect("json");
+        assert_eq!(value["stream_options"]["include_usage"], Value::Bool(false));
+    });
+}
+
+#[test]
+fn opencode_go_base_url_is_detected_for_portable_routing() {
+    assert!(is_opencode_go_base_url("https://opencode.ai/inference/go"));
+    assert!(is_opencode_go_base_url("https://opencode.ai/inference/go/"));
+    assert!(is_opencode_go_base_url("https://opencode.ai/zen/go/v1"));
+    assert!(is_opencode_go_base_url("https://sub.opencode.ai/inference/go"));
+    assert!(!is_opencode_go_base_url("https://opencode.ai/zen/v1"));
+    assert!(!is_opencode_go_base_url("https://opencode.ai.example/inference/go"));
+    assert!(!is_opencode_go_base_url("https://api.openai.com/v1"));
 }
 
 #[test]

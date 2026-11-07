@@ -13,6 +13,7 @@ const MAX_REJECTED_FIELD_REPAIRS: usize = 6;
 pub(super) enum RequestRepairKind {
     RejectedField,
     InvalidEncryptedContent,
+    StreamOptions,
 }
 
 pub(super) struct RequestRepair {
@@ -24,6 +25,7 @@ pub(super) struct RequestRepair {
 pub(super) struct RequestRepairState {
     rejected_field_repairs: usize,
     invalid_encrypted_content_repaired: bool,
+    stream_options_repaired: bool,
     seen_body_hashes: HashSet<[u8; 32]>,
 }
 
@@ -34,6 +36,7 @@ impl RequestRepairState {
         Self {
             rejected_field_repairs: 0,
             invalid_encrypted_content_repaired: false,
+            stream_options_repaired: false,
             seen_body_hashes,
         }
     }
@@ -50,6 +53,9 @@ impl RequestRepairState {
             {
                 return false;
             }
+            RequestRepairKind::StreamOptions if self.stream_options_repaired => {
+                return false;
+            }
             _ => {}
         }
         if !self.seen_body_hashes.insert(body_hash(body)) {
@@ -60,6 +66,7 @@ impl RequestRepairState {
             RequestRepairKind::InvalidEncryptedContent => {
                 self.invalid_encrypted_content_repaired = true;
             }
+            RequestRepairKind::StreamOptions => self.stream_options_repaired = true,
         }
         true
     }
@@ -78,10 +85,26 @@ pub(super) fn repair_request_body(
         Ok(value) => value,
         Err(_) => return Ok(None),
     };
-    let request: Value = match serde_json::from_slice(request_body.as_bytes()) {
+    let mut request: Value = match serde_json::from_slice(request_body.as_bytes()) {
         Ok(value) => value,
         Err(_) => return Ok(None),
     };
+
+    if is_stream_options_rejection(&response) {
+        if let Some(object) = request.as_object_mut() {
+            if object.remove("stream_options").is_some() {
+                let body = serde_json::to_vec(&request).map_err(|error| {
+                    format!("Failed to serialize stream_options repair: {error}")
+                })?;
+                return allowed_repair(
+                    state,
+                    RequestRepairKind::StreamOptions,
+                    body,
+                    "stream_options portable routing rejection",
+                );
+            }
+        }
+    }
 
     if let Some((body, reason)) = repair_rejected_field(request.clone(), &response)? {
         return allowed_repair(state, RequestRepairKind::RejectedField, body, reason);
@@ -216,6 +239,15 @@ fn namespace_input_index(param: &str) -> Option<usize> {
         return None;
     }
     index.parse().ok()
+}
+
+fn is_stream_options_rejection(response: &Value) -> bool {
+    // OpenCode Go 便携路由：stream_options 只支持 native Responses target。
+    let message = error_text(response, &["/error/message", "/message"])
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    message.contains("stream_options")
+        && (message.contains("native responses target") || message.contains("portable routing"))
 }
 
 fn is_invalid_encrypted_content_error(response: &Value) -> bool {
@@ -393,6 +425,58 @@ mod tests {
             .expect("repair result")
             .is_none());
         }
+    }
+
+    #[test]
+    fn repairs_stream_options_portable_routing_rejection_once() {
+        let initial = body(json!({
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "messages": []
+        }));
+        let error = json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "stream_options: requires a native Responses target; portable routing requires the full conversation in input"
+            }
+        });
+        let mut state = RequestRepairState::new(&initial);
+        let repaired = repair_request_body(
+            StatusCode::BAD_REQUEST,
+            &initial,
+            error.to_string().as_bytes(),
+            &mut state,
+        )
+        .expect("repair")
+        .expect("stream options repair");
+        let value: Value = serde_json::from_slice(repaired.body.as_bytes()).expect("json");
+        assert!(value.get("stream_options").is_none());
+        assert_eq!(value["stream"], json!(true));
+
+        assert!(repair_request_body(
+            StatusCode::BAD_REQUEST,
+            &repaired.body,
+            error.to_string().as_bytes(),
+            &mut state,
+        )
+        .expect("repair result")
+        .is_none());
+    }
+
+    #[test]
+    fn ignores_unrelated_bad_request_for_stream_options_repair() {
+        let initial = body(json!({ "stream_options": { "include_usage": true } }));
+        let error = json!({ "error": { "message": "messages: field required" } });
+        let mut state = RequestRepairState::new(&initial);
+        assert!(repair_request_body(
+            StatusCode::BAD_REQUEST,
+            &initial,
+            error.to_string().as_bytes(),
+            &mut state,
+        )
+        .expect("repair result")
+        .is_none());
     }
 
     #[test]

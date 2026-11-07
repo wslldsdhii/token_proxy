@@ -1023,14 +1023,22 @@ async fn openai_upstream(body: &'static str, status: StatusCode) -> reqwest::Res
 #[tokio::test]
 async fn buffered_fallback_commits_first_assistant_text() {
     use crate::proxy::session_fallback::{
-        extract::{assistant_hash, binding_hash, user_hash},
+        extract::{assistant_hash, binding_hash, extract_first_exchange},
         FallbackResolution, SessionFallbackStore,
     };
 
+    fn fingerprint(user: &str) -> crate::proxy::session_fallback::extract::SessionFingerprint {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "messages": [{ "role": "user", "content": user }]
+        }))
+        .expect("body");
+        extract_first_exchange(&body).expect("exchange").fingerprint()
+    }
+
     let dir = fallback_test_dir("commit");
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
-    let capture = match store.resolve("airouter", "req-1", &user, None) {
+    let user = fingerprint("hi");
+    let capture = match store.resolve("airouter", "req-1", &user) {
         FallbackResolution::Pending { capture, .. } => capture,
         _ => panic!("expected pending"),
     };
@@ -1053,7 +1061,7 @@ async fn buffered_fallback_commits_first_assistant_text() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
 
-    let expected = binding_hash(&user, &assistant_hash("hello"));
+    let expected = binding_hash(&user.user_anchor_hash, &assistant_hash("hello"));
     let raw = std::fs::read_to_string(store.file_path()).expect("mapping file");
     let value: serde_json::Value = serde_json::from_str(&raw).expect("mapping json");
     let entries = value["entries"].as_array().expect("entries");
@@ -1064,12 +1072,22 @@ async fn buffered_fallback_commits_first_assistant_text() {
 
 #[tokio::test]
 async fn buffered_fallback_skips_error_and_transform() {
-    use crate::proxy::session_fallback::{extract::user_hash, FallbackResolution, SessionFallbackStore};
+    use crate::proxy::session_fallback::{
+        extract::extract_first_exchange, FallbackResolution, SessionFallbackStore,
+    };
+
+    fn fingerprint(user: &str) -> crate::proxy::session_fallback::extract::SessionFingerprint {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "messages": [{ "role": "user", "content": user }]
+        }))
+        .expect("body");
+        extract_first_exchange(&body).expect("exchange").fingerprint()
+    }
 
     let dir = fallback_test_dir("skip");
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
-    let capture = match store.resolve("airouter", "req-error", &user, None) {
+    let user = fingerprint("hi");
+    let capture = match store.resolve("airouter", "req-error", &user) {
         FallbackResolution::Pending { capture, .. } => capture,
         _ => panic!("expected pending"),
     };
@@ -1092,7 +1110,7 @@ async fn buffered_fallback_skips_error_and_transform() {
     .await;
     assert_eq!(store.pending_len(), 1, "error response must not bind");
 
-    let capture = match store.resolve("airouter", "req-transform", &user, None) {
+    let capture = match store.resolve("airouter", "req-transform", &user) {
         FallbackResolution::Pending { capture, .. } => capture,
         _ => panic!("expected pending"),
     };

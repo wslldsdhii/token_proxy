@@ -1,9 +1,13 @@
-//! header_injection —— 从请求体提取 Trae 钩子写入的会话标记，并注入目标请求头。
+//! header_injection —— 提取客户端已有的会话标识，或按需注入目标请求头。
 //!
-//! 设计要点见 `openspec/changes/add-my-header-injection/design.md` 决策 6：
-//! - 只做文本扫描，不解析 JSON（请求体可能 100MB 级），无新增依赖；
-//! - 取**最后一次**出现的合法标记（多轮历史里最新 user 消息在文档末尾）；
-//! - 不修改请求体/响应，目标 Header 已存在时不覆盖。
+//! 优先级（高 → 低）：
+//! 1. 目标 Header 已存在 → 零注入、零分配；
+//! 2. 客户端已有任一会话头 → 零注入、零分配；
+//! 3. 请求体钩子标记；
+//! 4. 请求体显式会话字段（`prompt_cache_key` 等）；
+//! 5. 回退指纹（仅在 `fallback_enabled=true` 时）。
+//!
+//! 标记检测只做文本扫描，不解析 JSON；只有需要 body 会话字段或回退时才解析一次。
 
 use axum::http::{HeaderMap, HeaderValue};
 
@@ -21,6 +25,15 @@ const MIN_SESSION_ID_LEN: usize = 8;
 const MAX_SESSION_ID_LEN: usize = 64;
 /// 前缀之后允许扫描的窗口：足够容纳「空白 + 64 位 ID + 终止符」。
 const MARKER_WINDOW_BYTES: usize = 128;
+/// 客户端显式会话头；任一存在即视为客户端已有会话身份，注入层保持零副作用。
+const CLIENT_SESSION_HEADERS: &[&str] = &[
+    "x-opencode-session",
+    "x-session-id",
+    "session-id",
+    "session_id",
+    "x-conversation-id",
+    "thread-id",
+];
 
 /// 出站 Header 注入入口：`prepare_upstream_request_with_body` 在 `build_request_headers` 之后调用。
 ///
@@ -58,35 +71,48 @@ fn apply_config(
         return None;
     }
 
-    if let Some(session_id) = extract_session_id(body) {
-        if headers.contains_key(&config.target_header) {
-            tracing::debug!(
-                upstream_id,
-                header = %config.target_header,
-                "header injection skipped: target header already present"
-            );
-            return None;
-        }
-
-        let Ok(value) = HeaderValue::from_str(session_id) else {
-            tracing::warn!(
-                upstream_id,
-                "header injection skipped: session id is not a valid header value"
-            );
-            return None;
-        };
-
-        headers.insert(config.target_header.clone(), value);
+    // 目标 Header 已存在（客户端显式或静态复写命中）：不检测、不分配、不落盘。
+    if headers.contains_key(&config.target_header) {
         tracing::debug!(
             upstream_id,
             header = %config.target_header,
-            session_id,
-            "injected session header from hook marker"
+            "header injection skipped: target header already present"
         );
         return None;
     }
 
-    if !config.fallback_enabled {
+    // 客户端已有任一会话头：优先于标记与回退，避免同一请求出现两个会话身份。
+    if let Some(client_header) = CLIENT_SESSION_HEADERS
+        .iter()
+        .find(|name| headers.contains_key(**name))
+    {
+        tracing::debug!(
+            upstream_id,
+            client_header,
+            "header injection skipped: client session header already present"
+        );
+        return None;
+    }
+
+    if let Some(session_id) = extract_session_id(body) {
+        if let Ok(value) = HeaderValue::from_str(session_id) {
+            headers.insert(config.target_header.clone(), value);
+            tracing::debug!(
+                upstream_id,
+                header = %config.target_header,
+                session_id,
+                "injected session header from hook marker"
+            );
+            return None;
+        }
+        tracing::warn!(
+            upstream_id,
+            "header injection skipped: session id is not a valid header value"
+        );
+    }
+
+    let may_have_body_session = fallback_extract::body_may_contain_session_key(body);
+    if !config.fallback_enabled && !may_have_body_session {
         tracing::debug!(
             upstream_id,
             "header injection enabled but no session marker found"
@@ -94,11 +120,33 @@ fn apply_config(
         return None;
     }
 
-    if headers.contains_key("x-session-id") || headers.contains_key("x-opencode-session") {
+    let Some(hints) = fallback_extract::extract_request_hints(body) else {
         tracing::debug!(
             upstream_id,
-            "session fallback skipped: inbound session header already present"
+            "header injection skipped: request body is not JSON"
         );
+        return None;
+    };
+
+    if let Some(session_id) = hints.body_session_id.as_deref() {
+        if let Ok(value) = HeaderValue::from_str(session_id) {
+            headers.insert(config.target_header.clone(), value);
+            tracing::debug!(
+                upstream_id,
+                header = %config.target_header,
+                session_id,
+                "injected session header from request body"
+            );
+            return None;
+        }
+        tracing::warn!(
+            upstream_id,
+            "header injection skipped: body session id is not a valid header value"
+        );
+    }
+
+    if !config.fallback_enabled {
+        tracing::debug!(upstream_id, "session fallback disabled");
         return None;
     }
 
@@ -106,7 +154,7 @@ fn apply_config(
         tracing::debug!(upstream_id, "session fallback skipped: store unavailable");
         return None;
     };
-    let Some(exchange) = fallback_extract::extract_first_exchange(body) else {
+    let Some(exchange) = hints.exchange else {
         tracing::debug!(
             upstream_id,
             "session fallback skipped: no first user/assistant exchange"
@@ -114,29 +162,12 @@ fn apply_config(
         return None;
     };
 
-    let user_hash = fallback_extract::user_hash(&exchange.user);
-    let assistant_hash = exchange
-        .assistant
-        .as_deref()
-        .map(fallback_extract::assistant_hash);
-    let (id, capture) = match store.resolve(
-        upstream_id,
-        request_id,
-        &user_hash,
-        assistant_hash.as_deref(),
-    ) {
+    let fingerprint = exchange.fingerprint();
+    let (id, capture) = match store.resolve(upstream_id, request_id, &fingerprint) {
         FallbackResolution::Existing(id) => (id, None),
         FallbackResolution::Pending { id, capture } => (id, Some(capture)),
     };
 
-    if headers.contains_key(&config.target_header) {
-        tracing::debug!(
-            upstream_id,
-            header = %config.target_header,
-            "session fallback skipped: target header already present"
-        );
-        return None;
-    }
     let Ok(value) = HeaderValue::from_str(&id) else {
         tracing::warn!(
             upstream_id,

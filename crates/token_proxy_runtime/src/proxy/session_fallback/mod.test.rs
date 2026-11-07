@@ -1,6 +1,7 @@
 use super::extract::{
     assistant_hash, binding_hash, canonical_assistant_from_json_response, canonical_assistant_message,
-    extract_first_exchange, user_hash,
+    extract_first_exchange, legacy_assistant_hash, legacy_user_hash, user_hash, FirstAssistant,
+    SessionFingerprint,
 };
 use super::stream::AssistantAccumulator;
 use super::*;
@@ -25,6 +26,29 @@ fn body(messages: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&json!({ "messages": messages })).expect("body")
 }
 
+fn fingerprint(user: &str, assistant: Option<&str>) -> SessionFingerprint {
+    let messages = match assistant {
+        Some(text) => json!([
+            { "role": "user", "content": user },
+            { "role": "assistant", "content": text }
+        ]),
+        None => json!([{ "role": "user", "content": user }]),
+    };
+    extract_first_exchange(&body(messages))
+        .expect("exchange")
+        .fingerprint()
+}
+
+fn empty_assistant_fingerprint(user: &str) -> SessionFingerprint {
+    let messages = json!([
+        { "role": "user", "content": user },
+        { "role": "assistant", "content": null, "reasoning_content": "hidden" }
+    ]);
+    extract_first_exchange(&body(messages))
+        .expect("exchange")
+        .fingerprint()
+}
+
 #[test]
 fn extracts_first_user_and_assistant() {
     let exchange = extract_first_exchange(&body(json!([
@@ -34,8 +58,8 @@ fn extracts_first_user_and_assistant() {
         { "role": "user", "content": "again" }
     ])))
     .expect("exchange");
-    assert_eq!(exchange.user, "hi");
-    assert_eq!(exchange.assistant.as_deref(), Some("hello"));
+    assert_eq!(exchange.user_anchor, "hi");
+    assert_eq!(exchange.assistant, FirstAssistant::Present("hello".into()));
 }
 
 #[test]
@@ -50,8 +74,8 @@ fn normalizes_crlf_and_array_content() {
         ]}
     ])))
     .expect("exchange");
-    assert_eq!(exchange.user, "hi\nthere  \nagain");
-    assert_eq!(exchange.assistant.as_deref(), Some("ok"));
+    assert_eq!(exchange.user_anchor, "hithereagain");
+    assert_eq!(exchange.assistant, FirstAssistant::Present("ok".into()));
 }
 
 #[test]
@@ -64,22 +88,24 @@ fn uses_tool_calls_when_assistant_text_is_empty() {
         ]}
     ])))
     .expect("exchange");
-    assert_eq!(exchange.user, "run");
-    let assistant = exchange.assistant.expect("tool calls");
+    assert_eq!(exchange.user_anchor, "run");
+    let FirstAssistant::Present(assistant) = exchange.assistant else {
+        panic!("expected tool calls");
+    };
     assert!(assistant.contains("call_1"));
     assert!(assistant.contains("bash"));
     assert!(assistant.contains("{\\\"cmd\\\":\\\"ls\\\"}"));
 }
 
 #[test]
-fn reasoning_only_assistant_is_not_bindable() {
+fn reasoning_only_assistant_is_present_empty() {
     let exchange = extract_first_exchange(&body(json!([
         { "role": "user", "content": "think" },
         { "role": "assistant", "content": null, "reasoning_content": "hidden" }
     ])))
     .expect("exchange");
-    assert_eq!(exchange.user, "think");
-    assert!(exchange.assistant.is_none());
+    assert_eq!(exchange.user_anchor, "think");
+    assert_eq!(exchange.assistant, FirstAssistant::PresentEmpty);
 }
 
 #[test]
@@ -124,24 +150,24 @@ fn stream_accumulator_aggregates_tool_call_fragments() {
 fn binds_pending_then_reuses_same_id() {
     let dir = temp_dir();
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
-    let assistant = assistant_hash("hello");
+    let first_turn = fingerprint("hi", None);
 
-    let resolution = store.resolve("up", "req-1", &user, None);
+    let resolution = store.resolve("up", "req-1", &first_turn);
     let (id, capture) = match resolution {
         FallbackResolution::Pending { id, capture } => (id, capture),
         _ => panic!("expected pending"),
     };
     assert_eq!(id.len(), 32);
-    capture.commit(&assistant);
+    capture.commit(&assistant_hash("hello"));
 
     let entry = read_file_entries(store.file_path())
         .into_iter()
-        .find(|entry| entry.upstream_id == "up" && entry.hash == binding_hash(&user, &assistant))
+        .find(|entry| entry.upstream_id == "up" && entry.id == id)
         .expect("persisted entry");
-    assert_eq!(entry.id, id);
+    assert_eq!(entry.user_hash, first_turn.user_anchor_hash);
 
-    match store.resolve("up", "req-2", &user, Some(&assistant)) {
+    let second_turn = fingerprint("hi", Some("hello"));
+    match store.resolve("up", "req-2", &second_turn) {
         FallbackResolution::Existing(found) => assert_eq!(found, id),
         _ => panic!("expected existing"),
     }
@@ -151,13 +177,13 @@ fn binds_pending_then_reuses_same_id() {
 fn pending_retry_reuses_id() {
     let dir = temp_dir();
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
+    let first_turn = fingerprint("hi", None);
 
-    let first = match store.resolve("up", "req-1", &user, None) {
+    let first = match store.resolve("up", "req-1", &first_turn) {
         FallbackResolution::Pending { id, .. } => id,
         _ => panic!("expected pending"),
     };
-    let retry = match store.resolve("up", "req-1", &user, None) {
+    let retry = match store.resolve("up", "req-1", &first_turn) {
         FallbackResolution::Pending { id, .. } => id,
         _ => panic!("expected pending"),
     };
@@ -166,17 +192,128 @@ fn pending_retry_reuses_id() {
 }
 
 #[test]
-fn cross_upstream_isolated() {
+fn anchor_fallback_reuses_id_when_assistant_drifts() {
     let dir = temp_dir();
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
-    let assistant = assistant_hash("hello");
-
-    let a = match store.resolve("up-a", "req-a", &user, Some(&assistant)) {
+    let first = fingerprint("hi", Some("hello"));
+    let id = match store.resolve("up", "req-1", &first) {
         FallbackResolution::Existing(id) => id,
         _ => panic!("expected existing"),
     };
-    let b = match store.resolve("up-b", "req-b", &user, Some(&assistant)) {
+
+    let drifted = fingerprint("hi", Some("hello, world!"));
+    let reused = match store.resolve("up", "req-2", &drifted) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    assert_eq!(reused, id);
+    let entries = read_file_entries(store.file_path());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, id);
+}
+
+#[test]
+fn pending_by_anchor_completes_binding_without_new_id() {
+    let dir = temp_dir();
+    let store = SessionFallbackStore::new_for_test(&dir);
+    let first_turn = fingerprint("hi", None);
+    let id = match store.resolve("up", "req-1", &first_turn) {
+        FallbackResolution::Pending { id, .. } => id,
+        _ => panic!("expected pending"),
+    };
+
+    let second_turn = fingerprint("hi", Some("hello"));
+    let reused = match store.resolve("up", "req-2", &second_turn) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    assert_eq!(reused, id);
+    assert_eq!(store.pending_len(), 0);
+    let entries = read_file_entries(store.file_path());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, id);
+}
+
+#[test]
+fn present_empty_reuses_id_and_does_not_duplicate() {
+    let dir = temp_dir();
+    let store = SessionFallbackStore::new_for_test(&dir);
+    let fp = empty_assistant_fingerprint("think");
+
+    let first = match store.resolve("up", "req-1", &fp) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    let second = match store.resolve("up", "req-2", &fp) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    assert_eq!(first, second);
+    let entries = read_file_entries(store.file_path());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, first);
+}
+
+#[test]
+fn same_id_never_produces_duplicate_file_records() {
+    let dir = temp_dir();
+    let store = SessionFallbackStore::new_for_test(&dir);
+    let fp = fingerprint("hi", Some("hello"));
+
+    let first = match store.resolve("up", "req-1", &fp) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    let second = match store.resolve("up", "req-2", &fp) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    assert_eq!(first, second);
+    assert_eq!(read_file_entries(store.file_path()).len(), 1);
+}
+
+#[test]
+fn legacy_binding_is_migrated_to_new_anchor() {
+    let dir = temp_dir();
+    let user_text = "<system-reminder>dynamic</system-reminder><user_input>hi there</user_input>";
+    let old_user_hash = legacy_user_hash(user_text);
+    let old_assistant_hash = legacy_assistant_hash("hello");
+    let old_binding = binding_hash(&old_user_hash, &old_assistant_hash);
+    let legacy_entry = Entry {
+        upstream_id: "up".to_string(),
+        hash: old_binding,
+        user_hash: String::new(),
+        id: "legacy-id".to_string(),
+        created_at: 1,
+        last_used_at: now_ms(),
+    };
+    write_file_entries(&dir.join(FALLBACK_FILE_NAME), &[legacy_entry]);
+    let store = SessionFallbackStore::new_for_test(&dir);
+
+    let fp = fingerprint(user_text, Some("hello"));
+    let found = match store.resolve("up", "req-1", &fp) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    assert_eq!(found, "legacy-id");
+    let entries = read_file_entries(store.file_path());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "legacy-id");
+    assert_eq!(entries[0].user_hash, fp.user_anchor_hash);
+    assert_eq!(entries[0].hash, fp.binding_hash.expect("new binding"));
+}
+
+#[test]
+fn cross_upstream_isolated() {
+    let dir = temp_dir();
+    let store = SessionFallbackStore::new_for_test(&dir);
+    let fp = fingerprint("hi", Some("hello"));
+
+    let a = match store.resolve("up-a", "req-a", &fp) {
+        FallbackResolution::Existing(id) => id,
+        _ => panic!("expected existing"),
+    };
+    let b = match store.resolve("up-b", "req-b", &fp) {
         FallbackResolution::Existing(id) => id,
         _ => panic!("expected existing"),
     };
@@ -190,14 +327,8 @@ fn memory_limit_evicts_oldest_and_file_remains() {
     let store = SessionFallbackStore::new_for_test(&dir);
     let mut ids = Vec::new();
     for index in 0..51 {
-        let user = user_hash(&format!("u{index}"));
-        let assistant = assistant_hash(&format!("a{index}"));
-        let id = match store.resolve(
-            "up",
-            &format!("req-{index}"),
-            &user,
-            Some(&assistant),
-        ) {
+        let fp = fingerprint(&format!("u{index}"), Some(&format!("a{index}")));
+        let id = match store.resolve("up", &format!("req-{index}"), &fp) {
             FallbackResolution::Existing(id) => id,
             _ => panic!("expected existing"),
         };
@@ -217,13 +348,8 @@ fn memory_limit_evicts_oldest_and_file_remains() {
         .unwrap()
         .contains_key(&oldest_key));
 
-    // 内存满 + miss 时查文件，命中后加载回内存。
-    let loaded = match store.resolve(
-        "up",
-        "req-reload",
-        &user_hash("u0"),
-        Some(&assistant_hash("a0")),
-    ) {
+    let reload_fp = fingerprint("u0", Some("a0"));
+    let loaded = match store.resolve("up", "req-reload", &reload_fp) {
         FallbackResolution::Existing(id) => id,
         _ => panic!("expected existing"),
     };
@@ -241,8 +367,8 @@ fn pending_limit_is_bounded() {
     let dir = temp_dir();
     let store = SessionFallbackStore::new_for_test(&dir);
     for index in 0..51 {
-        let user = user_hash(&format!("u{index}"));
-        let _ = store.resolve("up", &format!("req-{index}"), &user, None);
+        let fp = fingerprint(&format!("u{index}"), None);
+        let _ = store.resolve("up", &format!("req-{index}"), &fp);
     }
     let pending = store.inner.pending.read().unwrap();
     assert_eq!(pending.len(), PENDING_LIMIT);
@@ -253,15 +379,15 @@ fn pending_limit_is_bounded() {
 fn debounce_waits_thirty_seconds() {
     let dir = temp_dir();
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
-    let assistant = assistant_hash("hello");
+    let first_turn = fingerprint("hi", None);
 
-    let (id, capture) = match store.resolve("up", "req-1", &user, None) {
+    let (id, capture) = match store.resolve("up", "req-1", &first_turn) {
         FallbackResolution::Pending { id, capture } => (id, capture),
         _ => panic!("expected pending"),
     };
-    capture.commit(&assistant);
-    let _ = store.resolve("up", "req-2", &user, Some(&assistant));
+    capture.commit(&assistant_hash("hello"));
+    let second_turn = fingerprint("hi", Some("hello"));
+    let _ = store.resolve("up", "req-2", &second_turn);
     assert!(store
         .inner
         .memory
@@ -293,14 +419,14 @@ fn debounce_waits_thirty_seconds() {
 fn cleanup_removes_expired_memory_file_and_pending() {
     let dir = temp_dir();
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
-    let assistant = assistant_hash("hello");
-    let (_, capture) = match store.resolve("up", "req-1", &user, None) {
+    let first_turn = fingerprint("hi", None);
+    let (_, capture) = match store.resolve("up", "req-1", &first_turn) {
         FallbackResolution::Pending { id, capture } => (id, capture),
         _ => panic!("expected pending"),
     };
-    capture.commit(&assistant);
-    let _ = store.resolve("up", "req-pending", &user_hash("pending"), None);
+    capture.commit(&assistant_hash("hello"));
+    let pending_fp = fingerprint("pending", None);
+    let _ = store.resolve("up", "req-pending", &pending_fp);
 
     {
         let mut memory = store.inner.memory.write().unwrap();
@@ -328,6 +454,7 @@ fn startup_prunes_expired_and_corrupt_file() {
     let stale = Entry {
         upstream_id: "up".to_string(),
         hash: "old-hash".to_string(),
+        user_hash: String::new(),
         id: "old-id".to_string(),
         created_at: 1,
         last_used_at: 1,
@@ -340,8 +467,8 @@ fn startup_prunes_expired_and_corrupt_file() {
     std::fs::write(&file, b"not json").expect("corrupt file");
     let store = SessionFallbackStore::new_for_test(&dir);
     assert!(store.inner.memory.read().unwrap().is_empty());
-    let user = user_hash("hi");
-    let _ = store.resolve("up", "req", &user, Some(&assistant_hash("hello")));
+    let fp = fingerprint("hi", Some("hello"));
+    let _ = store.resolve("up", "req", &fp);
     assert_eq!(read_file_entries(&file).len(), 1);
 }
 
@@ -352,8 +479,8 @@ async fn wrapped_stream_preserves_bytes_and_commits_binding() {
 
     let dir = temp_dir();
     let store = SessionFallbackStore::new_for_test(&dir);
-    let user = user_hash("hi");
-    let capture = match store.resolve("up", "req-stream", &user, None) {
+    let first_turn = fingerprint("hi", None);
+    let capture = match store.resolve("up", "req-stream", &first_turn) {
         FallbackResolution::Pending { capture, .. } => capture,
         _ => panic!("expected pending"),
     };
@@ -379,7 +506,7 @@ async fn wrapped_stream_preserves_bytes_and_commits_binding() {
     }
     assert_eq!(output, input.concat());
 
-    let expected = binding_hash(&user, &assistant_hash("hello"));
+    let expected = binding_hash(&first_turn.user_anchor_hash, &assistant_hash("hello"));
     let raw = std::fs::read_to_string(store.file_path()).expect("mapping file");
     let value: serde_json::Value = serde_json::from_str(&raw).expect("mapping json");
     assert!(value["entries"]
